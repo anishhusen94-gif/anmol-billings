@@ -1,0 +1,2916 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!-- Playables SDK -->
+<script>// Playables SDK v1.0.0
+// Game lifecycle bridge: rAF-based game-ready detection + event communication
+(function() {
+  'use strict';
+
+  // Idempotency: skip if already initialized (e.g., server-side injection
+  // followed by client-side inject-javascript via the Bloks webview component).
+  if (window.playablesSDK) return;
+
+  var HANDLER_NAME = 'playablesGameEventHandler';
+  var ANDROID_BRIDGE_NAME = '_MetaPlayablesBridge';
+  var RAF_FRAME_THRESHOLD = 3;
+
+  var gameReadySent = false;
+  var firstInteractionSent = false;
+  var errorSent = false;
+  var frameCount = 0;
+  var originalRAF = window.requestAnimationFrame;
+
+  // --- Transport Layer ---
+
+  function hasIOSBridge() {
+    return !!(window.webkit &&
+              window.webkit.messageHandlers &&
+              window.webkit.messageHandlers[HANDLER_NAME]);
+  }
+
+  function hasAndroidBridge() {
+    return !!(window[ANDROID_BRIDGE_NAME] &&
+              typeof window[ANDROID_BRIDGE_NAME].postEvent === 'function');
+  }
+
+  function isInIframe() {
+    return !!(window.parent && window.parent !== window);
+  }
+
+  function sendEvent(eventName, payload) {
+    var message = {
+      type: eventName,
+      payload: payload || {},
+      timestamp: Date.now()
+    };
+
+    if (hasIOSBridge()) {
+      try {
+        window.webkit.messageHandlers[HANDLER_NAME].postMessage(message);
+      } catch (e) { /* ignore */ }
+      return;
+    }
+
+    if (hasAndroidBridge()) {
+    try {
+      var p = payload || {};
+      p.__secureToken = window.__fbAndroidBridgeAuthToken || '';
+      p.timestamp = message.timestamp;
+      window[ANDROID_BRIDGE_NAME].postEvent(
+        eventName,
+        JSON.stringify(p)
+      );
+    } catch (e) { /* ignore */ }
+    return;
+  }
+
+    if (isInIframe()) {
+      try {
+        window.parent.postMessage(message, '*');
+      } catch (e) { /* ignore */ }
+      return;
+    }
+  }
+
+  // --- rAF Game-Ready Detection ---
+
+  function onFrame() {
+    if (gameReadySent) return;
+
+    frameCount++;
+    if (frameCount >= RAF_FRAME_THRESHOLD) {
+      gameReadySent = true;
+      sendEvent('game_ready', {
+        frame_count: frameCount,
+        detected_at: Date.now()
+      });
+      return;
+    }
+
+    originalRAF.call(window, onFrame);
+  }
+
+  if (originalRAF) {
+    window.requestAnimationFrame = function(callback) {
+      if (!gameReadySent) {
+        return originalRAF.call(window, function(timestamp) {
+          frameCount++;
+          if (frameCount >= RAF_FRAME_THRESHOLD && !gameReadySent) {
+            gameReadySent = true;
+            sendEvent('game_ready', {
+              frame_count: frameCount,
+              detected_at: Date.now()
+            });
+          }
+          callback(timestamp);
+        });
+      }
+      return originalRAF.call(window, callback);
+    };
+  }
+
+  // --- First User Interaction Detection ---
+
+  function setupFirstInteractionDetection() {
+    var events = ['touchstart', 'mousedown', 'keydown'];
+
+    function onFirstInteraction() {
+      if (firstInteractionSent) return;
+      firstInteractionSent = true;
+      sendEvent('user_interaction_start', null);
+
+      for (var i = 0; i < events.length; i++) {
+        document.removeEventListener(events[i], onFirstInteraction, true);
+      }
+    }
+
+    for (var i = 0; i < events.length; i++) {
+      document.addEventListener(events[i], onFirstInteraction, true);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupFirstInteractionDetection);
+  } else {
+    setupFirstInteractionDetection();
+  }
+
+  // --- Auto Error Capture ---
+
+  window.addEventListener('error', function(event) {
+    if (errorSent) return;
+    errorSent = true;
+    sendEvent('error', {
+      message: event.message || 'Unknown error',
+      source: event.filename || '',
+      lineno: event.lineno || 0,
+      colno: event.colno || 0,
+      auto_captured: true
+    });
+  });
+
+  window.addEventListener('unhandledrejection', function(event) {
+    if (errorSent) return;
+    errorSent = true;
+    var reason = event.reason;
+    sendEvent('error', {
+      message: (reason instanceof Error) ? reason.message : String(reason),
+      type: 'unhandled_promise_rejection',
+      auto_captured: true
+    });
+  });
+
+  // --- Public API ---
+
+  window.playablesSDK = {
+    complete: function(score) {
+      sendEvent('game_ended', {
+        score: score,
+        completed: true
+      });
+    },
+
+    error: function(message) {
+      if (errorSent) return;
+      errorSent = true;
+      sendEvent('error', {
+        message: message || 'Unknown error',
+        auto_captured: false
+      });
+    },
+
+    sendEvent: function(eventName, payload) {
+      if (!eventName || typeof eventName !== 'string') return;
+      sendEvent(eventName, payload);
+    }
+  };
+
+  // Kick off rAF detection in case no game code calls rAF immediately
+  if (originalRAF) {
+    originalRAF.call(window, onFrame);
+  }
+})();</script>
+
+<!-- Playables SDK -->
+<!-- PLAYABLE_TOUCH_PATCH_V1 --><script>
+(function() {
+  if (window.__playableTouchPatchInstalled) return;
+  window.__playableTouchPatchInstalled = true;
+  var origAdd = EventTarget.prototype.addEventListener;
+  var blockedTypes = { touchstart: 1, touchmove: 1, wheel: 1 };
+  EventTarget.prototype.addEventListener = function(type, listener, options) {
+    if (blockedTypes[type]) {
+      if (options === undefined || options === null) {
+        options = { passive: true };
+      } else if (typeof options === 'boolean') {
+        options = { capture: options, passive: true };
+      } else {
+        options = Object.assign({}, options, { passive: true });
+      }
+    }
+    return origAdd.call(this, type, listener, options);
+  };
+})();
+</script><script>window.Intl=window.Intl||{};Intl.t=function(s){return(Intl._locale&&Intl._locale[s])||s;};</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ANMOL CHILDRENWEAR BY ANISHHUSEN - Billing</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --primary: #7c3aed;
+    --primary-dark: #6d28d9;
+    --secondary: #ec4899;
+    --accent: #f59e0b;
+    --success: #10b981;
+    --danger: #ef4444;
+    --font-size-base: 16px;
+  }
+  * { -webkit-tap-highlight-color: transparent; }
+  body { 
+    font-family: 'Poppins', system-ui, -apple-system, sans-serif; 
+    font-size: var(--font-size-base);
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    padding-bottom: 90px;
+  }
+  .btn-active { transform: scale(0.97); transition: all 0.1s; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  input[type=number]::-webkit-inner-spin-button, 
+  input[type=number]::-webkit-outer-spin-button { opacity: 1; }
+  @media print { .no-print { display: none !important; } }
+  
+  @keyframes bounce-vertical {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+  }
+  .animate-bounce-up-down { animation: bounce-vertical 2s ease-in-out infinite; }
+  
+  @keyframes slideIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  .animate-slide { animation: slideIn 0.3s ease-out; }
+  
+  @keyframes pulse-glow {
+    0%, 100% { box-shadow: 0 0 20px rgba(124, 58, 237, 0.4); }
+    50% { box-shadow: 0 0 30px rgba(124, 58, 237, 0.6); }
+  }
+  .pulse-glow { animation: pulse-glow 2s ease-in-out infinite; }
+  
+  .glass-effect {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+  }
+  
+  .gradient-text {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  
+  .no-animation * {
+    animation: none !important;
+    transition: none !important;
+  }
+  
+  .colorful-card {
+    background: linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.95) 100%);
+    border-left: 4px solid var(--primary);
+  }
+
+  .bottom-nav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: rgba(255, 255, 255, 0.98);
+    backdrop-filter: blur(20px);
+    border-top: 2px solid rgba(124, 58, 237, 0.2);
+    z-index: 50;
+    box-shadow: 0 -4px 20px rgba(0,0,0,0.1);
+  }
+
+  .nav-btn {
+    transition: all 0.2s;
+  }
+  .nav-btn.active {
+    color: var(--primary);
+  }
+  .nav-btn.active .nav-icon {
+    transform: scale(1.15);
+  }
+</style>
+
+  <!-- Firebase – Cloud Sync -->
+  <script type="importmap">
+  {
+    "imports": {
+      "firebase/app": "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js",
+      "firebase/auth": "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js",
+      "firebase/firestore": "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"
+    }
+  }
+  </script>
+  <style>
+    #cloudBar{position:fixed;top:0;left:0;right:0;z-index:9999;background:#1e293b;color:#fff;font-size:12px;padding:6px 12px;display:flex;justify-content:space-between;align-items:center}
+    #cloudBar button{background:#7c3aed;color:#fff;border:none;padding:4px 10px;border-radius:8px;font-weight:700;font-size:12px}
+    body{padding-top:32px}
+    @media(max-width:640px){body{padding-top:38px}}
+  </style>
+</head>
+<body>
+<div id="cloudBar">
+  <span><i class="fa-solid fa-cloud"></i> <b id="cloudStatus">Offline – Local only</b> <span id="cloudEmail" style="opacity:.8"></span></span>
+  <div>
+    <button id="cloudLoginBtn" onclick="cloudSync.signIn()">Login with Google</button>
+    <button id="cloudLogoutBtn" onclick="cloudSync.signOut()" style="display:none;background:#475569">Logout</button>
+  </div>
+</div>
+
+<div id="app" class="max-w-6xl mx-auto min-h-screen flex flex-col p-2 md:p-4 pb-24">
+
+  <!-- Header with Animation -->
+  <header class="glass-effect rounded-3xl shadow-2xl mb-4 overflow-hidden no-print">
+    <div class="bg-gradient-to-r from-violet-600 via-purple-600 to-pink-600 p-5 md:p-6">
+      <div class="flex items-center justify-between flex-wrap gap-3">
+        <div class="flex items-center gap-3 md:gap-4">
+          <div class="bg-white/20 p-3 md:p-4 rounded-2xl backdrop-blur-sm animate-bounce-up-down" id="headerLogo">
+            <i class="fa-solid fa-children text-3xl md:text-4xl text-white"></i>
+          </div>
+          <div>
+            <h1 class="text-xl md:text-3xl font-extrabold text-white leading-tight animate-bounce-up-down" id="shopNameDisplay">ANMOL CHILDRENWEAR</h1>
+            <p class="text-xs md:text-sm text-purple-100 font-medium animate-bounce-up-down" id="headerTextDisplay">BY ANISHHUSEN</p>
+            <p class="text-xs text-purple-200 mt-1" id="headerText2Display">Professional Billing System</p>
+          </div>
+        </div>
+        <div class="text-right bg-white/10 backdrop-blur-sm rounded-xl p-3 md:p-4">
+          <p class="text-xs text-purple-100 font-medium">Today's Sale</p>
+          <p class="text-2xl md:text-3xl font-bold text-white" id="dailyTotal">₹0</p>
+          <p class="text-xs text-purple-200 mt-1" id="todayBillsCount">0 Bills</p>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Content Area -->
+  <div class="flex-1">
+
+        <!-- Quick Bill View - Items List Top -->
+    <div id="view-quickbill" class="view">
+      <div class="glass-effect rounded-3xl shadow-2xl p-4 md:p-6">
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="text-xl md:text-2xl font-bold gradient-text">Quick Bill</h2>
+          <button onclick="clearCurrentBill()" class="text-red-500 hover:text-red-600 text-sm font-medium bg-red-50 px-4 py-2 rounded-xl">
+            <i class="fa-solid fa-trash-can mr-1"></i>Clear
+          </button>
+        </div>
+
+        <!-- Customer -->
+        <div id="customerFields" class="space-y-2 mb-3">
+          <input type="text" id="customerName" placeholder="Customer Name" 
+            class="w-full px-4 py-3 rounded-xl border-2 border-purple-200 focus:border-violet-500 focus:outline-none text-base bg-white">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+            <input type="tel" id="customerMobile" placeholder="Mobile Number" 
+              class="w-full px-4 py-3 rounded-xl border-2 border-purple-200 focus:border-violet-500 focus:outline-none text-base bg-white">
+            <input type="text" id="customerAddress" placeholder="Address" 
+              class="w-full px-4 py-3 rounded-xl border-2 border-purple-200 focus:border-violet-500 focus:outline-none text-base bg-white">
+          </div>
+        </div>
+
+        <!-- Bill Items Table - ABOVE entry -->
+        <div class="mb-4">
+          <div class="max-h-64 overflow-y-auto no-scrollbar rounded-xl border-2 border-purple-100 bg-white">
+            <table class="w-full">
+              <thead class="bg-gradient-to-r from-violet-100 to-purple-100 sticky top-0">
+                <tr class="text-left text-xs text-gray-700 font-bold">
+                  <th class="p-3 w-8">#</th>
+                  <th class="p-3">Item</th>
+                  <th class="p-3 text-center w-16">Qty</th>
+                  <th class="p-3 text-right w-20">Rate</th>
+                  <th class="p-3 text-right w-24">Total</th>
+                  <th class="p-3 w-20 text-center">Action</th>
+                </tr>
+              </thead>
+              <tbody id="billItems" class="divide-y divide-purple-50"></tbody>
+            </table>
+            <div id="emptyBill" class="text-center py-10 text-gray-400">
+              <i class="fa-solid fa-receipt text-5xl mb-3 text-violet-300"></i>
+              <p class="font-medium">No items added yet</p>
+              <p class="text-xs mt-1">Neeche item add karo – Enter dabao</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Add Item Form - BELOW items list -->
+        <div class="bg-gradient-to-r from-violet-50 to-pink-50 rounded-2xl p-4 mb-4 border-2 border-violet-100">
+          <div class="grid grid-cols-1 md:grid-cols-12 gap-2">
+            <div class="md:col-span-5">
+              <label class="text-xs font-semibold text-gray-700 mb-1 block">Item Name</label>
+              <input type="text" id="itemName" list="itemsList" placeholder="Type or select item – Enter ↓" 
+                class="w-full px-3 py-3 rounded-xl border-2 border-purple-200 focus:border-violet-500 focus:outline-none text-base bg-white">
+              <datalist id="itemsList"></datalist>
+            </div>
+            <div class="md:col-span-2">
+              <label class="text-xs font-semibold text-gray-700 mb-1 block">Qty</label>
+              <input type="number" id="itemQty" value="1" min="1" 
+                class="w-full px-3 py-3 rounded-xl border-2 border-purple-200 focus:border-violet-500 focus:outline-none text-base text-center bg-white">
+            </div>
+            <div class="md:col-span-3">
+              <label class="text-xs font-semibold text-gray-700 mb-1 block">Rate ₹</label>
+              <input type="number" id="itemRate" placeholder="0" min="0" step="0.01"
+                class="w-full px-3 py-3 rounded-xl border-2 border-purple-200 focus:border-violet-500 focus:outline-none text-base bg-white">
+            </div>
+            <div class="md:col-span-2 flex items-end">
+              <button id="addItemBtn" onclick="addOrUpdateBillItem()" class="w-full bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 text-white py-3 rounded-xl font-bold transition-all shadow-lg">
+                <i class="fa-solid fa-plus mr-1"></i><span id="addBtnText">Add</span>
+              </button>
+            </div>
+          </div>
+          <p class="text-xs text-violet-600 mt-2"><i class="fa-solid fa-keyboard mr-1"></i> Enter = Next field → Rate me Enter = Item Add</p>
+        </div>
+
+        <!-- Discount Section -->
+        <div class="bg-amber-50 rounded-xl p-3 mb-4 border-2 border-amber-200">
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-xs font-semibold text-gray-700 mb-1 block">Discount %</label>
+              <input type="number" id="discountPercent" value="0" min="0" max="100" oninput="updateBillDisplay()"
+                class="w-full px-3 py-2 rounded-lg border-2 border-amber-200 focus:border-amber-500 focus:outline-none text-base bg-white">
+            </div>
+            <div>
+              <label class="text-xs font-semibold text-gray-700 mb-1 block">Discount Amount</label>
+              <input type="number" id="discountAmount" value="0" min="0" oninput="updateBillDisplay()"
+                class="w-full px-3 py-2 rounded-lg border-2 border-amber-200 focus:border-amber-500 focus:outline-none text-base bg-white">
+            </div>
+          </div>
+        </div>
+
+        <!-- GST Section -->
+        <div id="gstSection" class="mb-4 hidden">
+          <div class="bg-blue-50 rounded-xl p-3 border-2 border-blue-200">
+            <div class="flex justify-between items-center">
+              <span class="text-sm font-semibold text-gray-700">GST <span id="gstRateDisplay">18</span>%</span>
+              <span class="text-lg font-bold text-blue-600" id="gstAmountDisplay">₹0</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Payment Mode -->
+        <div class="mb-4">
+          <label class="text-sm font-bold text-gray-700 mb-2 block">Payment Mode</label>
+          <div class="grid grid-cols-3 gap-2">
+            <button onclick="setPaymentMode('Cash')" id="pay-Cash" class="pay-btn bg-gradient-to-r from-green-500 to-emerald-500 text-white py-3 rounded-xl font-bold shadow-lg">
+              <i class="fa-solid fa-money-bill-wave mr-1"></i>Cash
+            </button>
+            <button onclick="setPaymentMode('UPI')" id="pay-UPI" class="pay-btn bg-gray-200 text-gray-600 py-3 rounded-xl font-bold shadow-lg">
+              <i class="fa-brands fa-google-pay mr-1"></i>UPI
+            </button>
+            <button onclick="setPaymentMode('Credit')" id="pay-Credit" class="pay-btn bg-gray-200 text-gray-600 py-3 rounded-xl font-bold shadow-lg">
+              <i class="fa-solid fa-clock mr-1"></i>Credit
+            </button>
+          </div>
+        </div>
+
+        <!-- Notes -->
+        <textarea id="billNotes" placeholder="Bill Notes (Optional)" rows="2"
+          class="w-full px-4 py-2 mb-4 rounded-xl border-2 border-purple-200 focus:border-violet-500 focus:outline-none text-sm bg-white"></textarea>
+
+        <!-- Total & Actions -->
+        <div class="bg-gradient-to-r from-violet-600 via-purple-600 to-pink-600 text-white rounded-2xl p-5 mb-4 shadow-xl">
+          <div class="space-y-2">
+            <div class="flex justify-between items-center text-sm">
+              <span class="text-purple-100">Subtotal</span>
+              <span class="font-semibold" id="subtotalDisplay">₹0</span>
+            </div>
+            <div class="flex justify-between items-center text-sm" id="discountRow" style="display:none;">
+              <span class="text-purple-100">Discount</span>
+              <span class="font-semibold text-amber-200" id="discountDisplay">-₹0</span>
+            </div>
+            <div class="flex justify-between items-center text-sm" id="gstRow" style="display:none;">
+              <span class="text-purple-100">GST</span>
+              <span class="font-semibold" id="gstTotalDisplay">₹0</span>
+            </div>
+            <div class="border-t border-white/30 pt-2 flex justify-between items-center">
+              <span class="text-lg font-medium">Total Amount</span>
+              <span class="text-3xl md:text-4xl font-extrabold" id="billTotal">₹0</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <button onclick="saveBill()" class="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white py-4 rounded-2xl font-bold text-base shadow-xl transition-all">
+            <i class="fa-solid fa-floppy-disk mr-2"></i>Save Data
+          </button>
+          <button onclick="saveBillAndPrint()" class="bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white py-4 rounded-2xl font-bold text-base shadow-xl transition-all">
+            <i class="fa-solid fa-print mr-2"></i>Save & Print
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Saved Bills View -->
+<!-- Saved Bills View -->
+    <div id="view-savebill" class="view hidden">
+      <div class="glass-effect rounded-3xl shadow-2xl p-4 md:p-6">
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="text-xl md:text-2xl font-bold gradient-text">Saved Bills</h2>
+          <button onclick="exportAllBills()" class="bg-violet-100 text-violet-600 px-4 py-2 rounded-xl text-sm font-semibold">
+            <i class="fa-solid fa-download mr-1"></i>Export
+          </button>
+        </div>
+        <div class="grid grid-cols-3 gap-2 mb-4">
+          <button onclick="filterSavedBills('all')" class="filter-btn bg-violet-600 text-white py-2 rounded-xl text-xs font-semibold">All</button>
+          <button onclick="filterSavedBills('Cash')" class="filter-btn bg-gray-200 text-gray-600 py-2 rounded-xl text-xs font-semibold">Cash</button>
+          <button onclick="filterSavedBills('UPI')" class="filter-btn bg-gray-200 text-gray-600 py-2 rounded-xl text-xs font-semibold">UPI</button>
+        </div>
+        <input type="text" id="searchBills" oninput="filterBills()" placeholder="Search by bill no or customer..." 
+          class="w-full px-4 py-3 mb-4 rounded-xl border-2 border-purple-200 focus:border-violet-500 focus:outline-none bg-white">
+        <div id="savedBillsList" class="space-y-3 max-h-[calc(100vh-480px)] overflow-y-auto no-scrollbar"></div>
+      </div>
+    </div>
+
+    <!-- Printing View -->
+    <div id="view-printing" class="view hidden">
+      <div class="glass-effect rounded-3xl shadow-2xl p-4 md:p-6">
+        <h2 class="text-xl md:text-2xl font-bold gradient-text mb-4">Bluetooth Printing</h2>
+        
+        <div class="bg-gradient-to-r from-amber-50 to-orange-50 border-l-4 border-amber-500 p-3 rounded-xl mb-4 text-sm text-amber-800">
+          <i class="fa-solid fa-circle-info mr-1"></i>
+          Chrome me Connect button dabao – Phone Settings me pair mat karo
+        </div>
+
+        <div class="mb-4">
+          <label class="text-sm font-bold text-gray-700 mb-2 block">Paper Size</label>
+          <div class="grid grid-cols-2 gap-2" id="printerSizeButtons">
+            <button onclick="setPaperSize('50mm')" id="paper-50mm" class="paper-btn bg-violet-600 text-white py-3 rounded-xl font-bold shadow-lg">
+              50mm (2 Inch:32)
+            </button>
+            <button onclick="setPaperSize('80mm')" id="paper-80mm" class="paper-btn bg-gray-200 text-gray-600 py-3 rounded-xl font-bold shadow-lg">
+              80mm (3 Inch:42)
+            </button>
+          </div>
+        </div>
+
+        <button onclick="connectBluetooth()" class="w-full bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white py-4 rounded-2xl font-bold mb-4 shadow-xl">
+          <i class="fa-brands fa-bluetooth mr-2"></i>Connect Bluetooth Printer
+        </button>
+
+        <div id="btStatus" class="text-center text-sm text-gray-600 mb-4 p-3 bg-gray-50 rounded-xl"></div>
+
+        <h3 class="font-bold text-gray-700 mb-2">Select Bill to Print</h3>
+        <div id="printBillsList" class="space-y-2 max-h-96 overflow-y-auto no-scrollbar"></div>
+      </div>
+    </div>
+
+    <!-- Items View -->
+    <div id="view-items" class="view hidden">
+      <div class="glass-effect rounded-3xl shadow-2xl p-4 md:p-6">
+        <h2 class="text-xl md:text-2xl font-bold gradient-text mb-4">Manage Items</h2>
+          <div class="flex flex-wrap gap-2 mb-3 text-xs">
+            <label class="bg-emerald-100 text-emerald-700 px-3 py-2 rounded-xl font-bold cursor-pointer hover:bg-emerald-200">
+              <i class="fa-solid fa-file-csv mr-1"></i>Import CSV
+              <input type="file" id="importItemsCsv" accept=".csv" class="hidden" onchange="importItemsFromCSV(event)">
+            </label>
+            <button onclick="exportItemsCSV()" class="bg-gray-100 text-gray-700 px-3 py-2 rounded-xl font-bold hover:bg-gray-200">
+              <i class="fa-solid fa-download mr-1"></i>Export CSV
+            </button>
+            <span class="text-gray-500 py-2">Format: Name,Rate</span>
+          </div>
+        
+        <div class="bg-gradient-to-r from-violet-50 to-purple-50 rounded-2xl p-4 mb-4">
+          <div class="grid grid-cols-1 md:grid-cols-12 gap-2">
+            <div class="md:col-span-5">
+              <input type="text" id="newItemName" placeholder="Item Name" 
+                class="w-full px-3 py-3 rounded-xl border-2 border-purple-200 focus:border-violet-500 focus:outline-none text-base bg-white">
+            </div>
+            <div class="md:col-span-3">
+              <input type="number" id="newItemRate" placeholder="Rate ₹" min="0" step="0.01"
+                class="w-full px-3 py-3 rounded-xl border-2 border-purple-200 focus:border-violet-500 focus:outline-none text-base bg-white">
+            </div>
+            <div class="md:col-span-3">
+              <select id="newItemCategory" class="w-full px-3 py-3 rounded-xl border-2 border-purple-200 focus:border-violet-500 focus:outline-none text-base bg-white">
+                <option value="General">General</option>
+                <option value="Shirts">Shirts</option>
+                <option value="Pants">Pants</option>
+                <option value="Frocks">Frocks</option>
+                <option value="Sweaters">Sweaters</option>
+              </select>
+            </div>
+            <div class="md:col-span-1">
+              <button onclick="addItem()" class="w-full bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 text-white py-3 rounded-xl font-bold shadow-lg">
+                <i class="fa-solid fa-plus"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div id="itemsListContainer" class="space-y-2 max-h-[calc(100vh-460px)] overflow-y-auto no-scrollbar"></div>
+      </div>
+    </div>
+
+    <!-- Settings View -->
+    <div id="view-settings" class="view hidden">
+      <div class="glass-effect rounded-3xl shadow-2xl p-4 md:p-6">
+        <h2 class="text-xl md:text-2xl font-bold gradient-text mb-6">Settings</h2>
+        
+        <div class="space-y-4 max-h-[calc(100vh-340px)] overflow-y-auto no-scrollbar pr-2">
+          
+          <!-- Business Details -->
+          <div class="colorful-card rounded-2xl p-4">
+            <h3 class="font-bold text-violet-700 mb-3 flex items-center"><i class="fa-solid fa-store mr-2"></i>Business Details</h3>
+            <div class="space-y-3">
+              <div>
+                <label class="text-xs font-semibold text-gray-700 mb-1 block">Business Logo</label>
+                <input type="file" id="set-businessLogo" accept="image/*" onchange="handleLogoUpload(event)" class="w-full px-3 py-2 rounded-xl border-2 border-purple-200 bg-white text-sm">
+                <img id="logoPreview" class="hidden mt-2 max-h-20 rounded-lg" />
+              </div>
+              <div>
+                <label class="text-xs font-semibold text-gray-700 mb-1 block">Business Name</label>
+                <input type="text" id="set-shopName" class="w-full px-3 py-2 rounded-xl border-2 border-purple-200 focus:border-violet-500 focus:outline-none bg-white">
+              </div>
+              <div>
+                <label class="text-xs font-semibold text-gray-700 mb-1 block">Address</label>
+                <textarea id="set-shopAddress" rows="2" class="w-full px-3 py-2 rounded-xl border-2 border-purple-200 focus:border-violet-500 focus:outline-none bg-white"></textarea>
+              </div>
+              <div>
+                <label class="text-xs font-semibold text-gray-700 mb-1 block">Header Text</label>
+                <input type="text" id="set-headerText" placeholder="BY ANISHHUSEN" class="w-full px-3 py-2 rounded-xl border-2 border-purple-200 focus:border-violet-500 focus:outline-none bg-white">
+              </div>
+              <div>
+                <label class="text-xs font-semibold text-gray-700 mb-1 block">Header Text 2</label>
+                <input type="text" id="set-headerText2" placeholder="Professional Billing System" class="w-full px-3 py-2 rounded-xl border-2 border-purple-200 focus:border-violet-500 focus:outline-none bg-white">
+              </div>
+              <div>
+                <label class="text-xs font-semibold text-gray-700 mb-1 block">Mobile Number</label>
+                <input type="tel" id="set-shopMobile" class="w-full px-3 py-2 rounded-xl border-2 border-purple-200 focus:border-violet-500 focus:outline-none bg-white">
+              </div>
+              <div>
+                <label class="text-xs font-semibold text-gray-700 mb-1 block">GST No</label>
+                <input type="text" id="set-gstNo" placeholder="GST Number (Optional)" class="w-full px-3 py-2 rounded-xl border-2 border-purple-200 focus:border-violet-500 focus:outline-none bg-white">
+              </div>
+            </div>
+          </div>
+
+          <!-- Invoice Details -->
+          <div class="colorful-card rounded-2xl p-4">
+            <h3 class="font-bold text-violet-700 mb-3 flex items-center"><i class="fa-solid fa-file-invoice mr-2"></i>Invoice Details</h3>
+            <div class="space-y-3">
+              <div>
+                <label class="text-xs font-semibold text-gray-700 mb-1 block">Invoice Title</label>
+                <input type="text" id="set-invoiceTitle" placeholder="TAX INVOICE" class="w-full px-3 py-2 rounded-xl border-2 border-purple-200 focus:border-violet-500 focus:outline-none bg-white">
+              </div>
+              <div>
+                <label class="text-xs font-semibold text-gray-700 mb-1 block">Invoice Serial No</label>
+                <input type="text" id="set-invoicePrefix" placeholder="BILL" class="w-full px-3 py-2 rounded-xl border-2 border-purple-200 focus:border-violet-500 focus:outline-none bg-white">
+              </div>
+              <div>
+                <label class="text-xs font-semibold text-gray-700 mb-1 block">Restaurant Order No</label>
+                <input type="text" id="set-orderNo" placeholder="Optional" class="w-full px-3 py-2 rounded-xl border-2 border-purple-200 focus:border-violet-500 focus:outline-none bg-white">
+              </div>
+              <div>
+                <label class="text-xs font-semibold text-gray-700 mb-1 block">Footer Text</label>
+                <input type="text" id="set-footerText" placeholder="Thank You! Visit Again" class="w-full px-3 py-2 rounded-xl border-2 border-purple-200 focus:border-violet-500 focus:outline-none bg-white">
+              </div>
+              <div>
+                <label class="text-xs font-semibold text-gray-700 mb-1 block">Footer Text 2</label>
+                <input type="text" id="set-footerText2" placeholder="Thank you for shopping with us!" class="w-full px-3 py-2 rounded-xl border-2 border-purple-200 focus:border-violet-500 focus:outline-none bg-white">
+              </div>
+              <div>
+                <label class="text-xs font-semibold text-gray-700 mb-1 block">Footer Image</label>
+                <input type="file" id="set-footerImage" accept="image/*" onchange="handleFooterImageUpload(event)" class="w-full px-3 py-2 rounded-xl border-2 border-purple-200 bg-white text-sm">
+                <img id="footerImagePreview" class="hidden mt-2 max-h-20 rounded-lg" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Print Settings -->
+          <div class="colorful-card rounded-2xl p-4">
+            <h3 class="font-bold text-violet-700 mb-3 flex items-center"><i class="fa-solid fa-print mr-2"></i>Print Settings</h3>
+            <div class="space-y-3">
+              <div>
+                <label class="text-xs font-semibold text-gray-700 mb-1 block">Roll Size</label>
+                <select id="set-printerSize" class="w-full px-3 py-2 rounded-xl border-2 border-purple-200 focus:border-violet-500 focus:outline-none bg-white">
+                  <option value="50mm">2 Inch:32 Size (50mm)</option>
+                  <option value="80mm">3 Inch:42 Size (80mm)</option>
+                </select>
+              </div>
+          <div>
+            <label class="block text-xs font-bold text-gray-700 mb-1">Thermal Printer</label>
+            <button type="button" onclick="connectBluetoothPrinter()" id="btConnectBtn" class="w-full bg-sky-600 hover:bg-sky-700 text-white py-2 rounded-xl font-bold text-sm">
+              <i class="fa-brands fa-bluetooth mr-1"></i><span id="btStatus">Connect Printer</span>
+            </button>
+            <p class="text-[11px] text-gray-500 mt-1">ESC/POS 80mm – Chrome Android</p>
+          </div>
+              <div>
+                <label class="text-xs font-semibold text-gray-700 mb-1 block">Print Format</label>
+                <select id="set-printFormat" class="w-full px-3 py-2 rounded-xl border-2 border-purple-200 focus:border-violet-500 focus:outline-none bg-white">
+                  <option value="english">English Only</option>
+                  <option value="multi">Multi-Language</option>
+                </select>
+              </div>
+              <div>
+                <label class="text-xs font-semibold text-gray-700 mb-1 block">Currency</label>
+                <input type="text" id="set-currency" placeholder="₹" maxlength="3" class="w-full px-3 py-2 rounded-xl border-2 border-purple-200 focus:border-violet-500 focus:outline-none bg-white">
+              </div>
+              <div>
+                <label class="text-xs font-semibold text-gray-700 mb-1 block">UPI ID</label>
+                <input type="text" id="set-upiId" placeholder="yourname@upi" oninput="generateUPIQR()" class="w-full px-3 py-2 rounded-xl border-2 border-purple-200 focus:border-violet-500 focus:outline-none bg-white">
+              </div>
+              <div class="flex items-center justify-between bg-purple-50 p-3 rounded-xl">
+                <span class="text-sm font-semibold text-gray-700">Fixed Bill Amount</span>
+                <label class="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" id="set-fixedBillAmount" onchange="generateUPIQR()" class="sr-only peer">
+                  <div class="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600"></div>
+                </label>
+              </div>
+              <div id="upiQrSection" class="bg-white p-4 rounded-xl border-2 border-purple-200">
+                <div class="text-center">
+                  <p class="text-xs font-semibold text-gray-700 mb-2">UPI QR Code Preview</p>
+                  <div id="qrcodeUpi" class="flex justify-center"></div>
+                  <p class="text-xs text-gray-500 mt-2" id="qrCodeText">Enter UPI ID to generate QR</p>
+                </div>
+              </div>
+              <div class="flex items-center justify-between bg-purple-50 p-3 rounded-xl">
+                <span class="text-sm font-semibold text-gray-700">Enable GST</span>
+                <label class="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" id="set-enableGST" class="sr-only peer">
+                  <div class="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600"></div>
+                </label>
+              </div>
+              <div>
+                <label class="text-xs font-semibold text-gray-700 mb-1 block">GST Rate %</label>
+                <input type="number" id="set-gstRate" value="18" min="0" max="28" class="w-full px-3 py-2 rounded-xl border-2 border-purple-200 focus:border-violet-500 focus:outline-none bg-white">
+              </div>
+              <div class="flex items-center justify-between bg-purple-50 p-3 rounded-xl">
+                <span class="text-sm font-semibold text-gray-700">Show Customer Name</span>
+                <label class="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" id="set-showCustomerName" checked class="sr-only peer">
+                  <div class="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600"></div>
+                </label>
+              </div>
+              <div class="flex items-center justify-between bg-purple-50 p-3 rounded-xl">
+                <span class="text-sm font-semibold text-gray-700">Show Customer Mobile</span>
+                <label class="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" id="set-showCustomerMobile" class="sr-only peer">
+                  <div class="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600"></div>
+                </label>
+              </div>
+              <div class="flex items-center justify-between bg-purple-50 p-3 rounded-xl">
+                <span class="text-sm font-semibold text-gray-700">Show Customer Address</span>
+                <label class="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" id="set-showCustomerAddress" class="sr-only peer">
+                  <div class="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600"></div>
+                </label>
+              </div>
+              <div class="flex items-center justify-between bg-purple-50 p-3 rounded-xl">
+                <span class="text-sm font-semibold text-gray-700">Show Credit</span>
+                <label class="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" id="set-showCredit" checked class="sr-only peer">
+                  <div class="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600"></div>
+                </label>
+              </div>
+              <div class="flex items-center justify-between bg-purple-50 p-3 rounded-xl">
+                <span class="text-sm font-semibold text-gray-700">Show Date</span>
+                <label class="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" id="set-showDate" checked class="sr-only peer">
+                  <div class="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600"></div>
+                </label>
+              </div>
+              <div class="flex items-center justify-between bg-purple-50 p-3 rounded-xl">
+                <span class="text-sm font-semibold text-gray-700">Auto-Cut After Printing</span>
+                <label class="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" id="set-autoCut" checked class="sr-only peer">
+                  <div class="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600"></div>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Default Settings -->
+          <div class="colorful-card rounded-2xl p-4">
+            <h3 class="font-bold text-violet-700 mb-3 flex items-center"><i class="fa-solid fa-sliders mr-2"></i>Default Settings</h3>
+            <div class="space-y-3">
+              <div>
+                <label class="text-xs font-semibold text-gray-700 mb-1 block">Default Payment Mode</label>
+                <select id="set-defaultPayment" class="w-full px-3 py-2 rounded-xl border-2 border-purple-200 focus:border-violet-500 focus:outline-none bg-white">
+                  <option value="Cash">Cash</option>
+                  <option value="UPI">UPI</option>
+                  <option value="Credit">Credit</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Appearance -->
+          <div class="colorful-card rounded-2xl p-4">
+            <h3 class="font-bold text-violet-700 mb-3 flex items-center"><i class="fa-solid fa-palette mr-2"></i>Appearance</h3>
+            <div class="space-y-3">
+              <div>
+                <label class="text-xs font-semibold text-gray-700 mb-1 block">Theme Color</label>
+                <div class="flex gap-2">
+                  <input type="color" id="set-themeColor" value="#7c3aed" class="h-10 w-20 rounded-lg border-2 border-purple-200 cursor-pointer">
+                  <button onclick="resetThemeColor()" class="bg-gray-200 text-gray-700 px-4 py-2 rounded-xl text-sm font-semibold">Reset</button>
+                </div>
+              </div>
+              <div>
+                <label class="text-xs font-semibold text-gray-700 mb-1 block">Font Size</label>
+                <select id="set-fontSize" class="w-full px-3 py-2 rounded-xl border-2 border-purple-200 focus:border-violet-500 focus:outline-none bg-white">
+                  <option value="14">Small (14px)</option>
+                  <option value="16">Medium (16px)</option>
+                  <option value="18">Large (18px)</option>
+                  <option value="20">Extra Large (20px)</option>
+                </select>
+              </div>
+              <div class="flex items-center justify-between bg-purple-50 p-3 rounded-xl">
+                <span class="text-sm font-semibold text-gray-700">Enable Animations</span>
+                <label class="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" id="set-enableAnimation" checked class="sr-only peer">
+                  <div class="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600"></div>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- App Behavior -->
+          <div class="colorful-card rounded-2xl p-4">
+            <h3 class="font-bold text-violet-700 mb-3 flex items-center"><i class="fa-solid fa-mobile-screen mr-2"></i>App Behavior</h3>
+            <div class="space-y-3">
+              <div class="flex items-center justify-between bg-purple-50 p-3 rounded-xl">
+                <div>
+                  <span class="text-sm font-semibold text-gray-700 block">Auto Save Bills</span>
+                  <span class="text-xs text-gray-500">Save bill to localStorage automatically</span>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" id="set-autoSave" checked class="sr-only peer">
+                  <div class="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600"></div>
+                </label>
+              </div>
+              <div class="flex items-center justify-between bg-purple-50 p-3 rounded-xl">
+                <div>
+                  <span class="text-sm font-semibold text-gray-700 block">Sound on Bill Add</span>
+                  <span class="text-xs text-gray-500">Play sound when item added</span>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" id="set-soundEnabled" checked class="sr-only peer">
+                  <div class="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600"></div>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Data Management -->
+          <div class="colorful-card rounded-2xl p-4">
+            <h3 class="font-bold text-violet-700 mb-3 flex items-center"><i class="fa-solid fa-database mr-2"></i>Data Management</h3>
+            <div class="space-y-2">
+              <button onclick="backupData()" class="w-full bg-gradient-to-r from-blue-500 to-indigo-600 text-white py-3 rounded-xl font-bold shadow-lg">
+                <i class="fa-solid fa-download mr-2"></i>Backup Data
+              </button>
+              <button onclick="document.getElementById('restoreFile').click()" class="w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white py-3 rounded-xl font-bold shadow-lg">
+                <i class="fa-solid fa-upload mr-2"></i>Restore Data
+              </button>
+              <input type="file" id="restoreFile" accept=".json" style="display:none" onchange="restoreData(event)">
+              <button onclick="clearAllData()" class="w-full bg-gradient-to-r from-red-500 to-rose-600 text-white py-3 rounded-xl font-bold shadow-lg">
+                <i class="fa-solid fa-trash mr-2"></i>Clear All Data
+              </button>
+            </div>
+          </div>
+
+          <button onclick="saveSettings()" class="w-full mt-4 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 text-white py-4 rounded-2xl font-bold text-base shadow-xl transition-all">
+            <i class="fa-solid fa-check mr-2"></i>Save All Settings
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Bottom Navigation -->
+<div class="bottom-nav no-print">
+  <div class="max-w-6xl mx-auto grid grid-cols-5 gap-1 px-2 py-3">
+    <button onclick="showView('quickbill')" id="nav-quickbill" class="nav-btn active flex flex-col items-center justify-center py-2 px-1 rounded-xl transition-all">
+      <i class="fa-solid fa-bolt nav-icon text-2xl mb-1"></i>
+      <span class="text-[10px] font-bold">Quick Bill</span>
+    </button>
+    <button onclick="showView('savebill')" id="nav-savebill" class="nav-btn text-gray-500 flex flex-col items-center justify-center py-2 px-1 rounded-xl transition-all">
+      <i class="fa-solid fa-floppy-disk nav-icon text-2xl mb-1"></i>
+      <span class="text-[10px] font-bold">Save Data</span>
+    </button>
+    <button onclick="showView('printing')" id="nav-printing" class="nav-btn text-gray-500 flex flex-col items-center justify-center py-2 px-1 rounded-xl transition-all">
+      <i class="fa-solid fa-print nav-icon text-2xl mb-1"></i>
+      <span class="text-[10px] font-bold">Printing</span>
+    </button>
+    <button onclick="showView('items')" id="nav-items" class="nav-btn text-gray-500 flex flex-col items-center justify-center py-2 px-1 rounded-xl transition-all">
+      <i class="fa-solid fa-boxes-stacked nav-icon text-2xl mb-1"></i>
+      <span class="text-[10px] font-bold">Item</span>
+    </button>
+    <button onclick="showView('settings')" id="nav-settings" class="nav-btn text-gray-500 flex flex-col items-center justify-center py-2 px-1 rounded-xl transition-all">
+      <i class="fa-solid fa-gear nav-icon text-2xl mb-1"></i>
+      <span class="text-[10px] font-bold">Settings</span>
+    </button>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="fixed bottom-24 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-6 py-3 rounded-full shadow-2xl opacity-0 pointer-events-none transition-all duration-300 z-50"></div>
+
+<!-- Bill Preview Modal -->
+<div id="billModal" class="fixed inset-0 bg-black/60 z-50 hidden items-center justify-center p-3 no-print">
+  <div class="bg-white rounded-[20px] shadow-2xl max-w-md w-full max-h-[92vh] overflow-y-auto relative">
+    <div class="sticky top-0 bg-white z-10 px-4 py-3 flex items-center justify-between border-b">
+      <div class="flex items-center gap-3">
+        <button onclick="closeBillModal()" class="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center"><i class="fa-solid fa-chevron-left"></i></button>
+        <h3 class="font-bold text-lg">Bill Details <span style="font-size:10px;color:#f97316">v4.2</span></h3>
+      </div>
+      <button onclick="closeBillModal()" class="w-9 h-9 rounded-xl bg-red-500 text-white flex items-center justify-center"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div id="billPreviewContent" class="p-5 text-[14px] text-black"></div>
+    <div class="sticky bottom-0 bg-white border-t p-3 grid grid-cols-3 gap-3">
+      <button onclick="editSavedBill()" class="bg-gray-100 rounded-xl py-3 flex flex-col items-center"><i class="fa-solid fa-pen-to-square text-orange-500 text-xl mb-1"></i><span class="text-xs font-bold">EDIT</span></button>
+      <button onclick="openShareOptions()" class="bg-gray-100 rounded-xl py-3 flex flex-col items-center"><i class="fa-solid fa-share-nodes text-orange-500 text-xl mb-1"></i><span class="text-xs font-bold">SHARE</span></button>
+      <button onclick="printBillThermal()" class="bg-gray-100 rounded-xl py-3 flex flex-col items-center"><span class="text-xl mb-1">🖨️</span><span class="text-xs font-bold">PRINT</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- Share Options Modal -->
+<div id="shareModal" class="fixed inset-0 bg-black/60 z-[60] hidden items-center justify-center p-4">
+  <div class="bg-white rounded-[20px] shadow-2xl max-w-sm w-full p-5">
+    <div class="flex justify-between items-center mb-4">
+      <h3 class="font-bold text-lg">Share Options</h3>
+      <button onclick="closeShareModal()" class="text-orange-500 text-xl"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="grid grid-cols-2 gap-4">
+      <button onclick="shareAsPDF()" class="bg-gray-50 rounded-xl py-6 flex flex-col items-center border">
+        <i class="fa-solid fa-file-pdf text-orange-400 text-3xl mb-2"></i>
+        <span class="font-semibold text-orange-500">PDF</span>
+      </button>
+      <button onclick="shareAsImage()" class="bg-gray-50 rounded-xl py-6 flex flex-col items-center border">
+        <i class="fa-solid fa-file-image text-orange-400 text-3xl mb-2"></i>
+        <span class="font-semibold text-orange-500">Image / WhatsApp</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+const { jsPDF } = window.jspdf;
+
+// Settings Management
+let settings = JSON.parse(localStorage.getItem('kidsWearSettings') || '{}');
+const defaultSettings = {
+  shopName: 'ANMOL CHILDRENWEAR',
+  shopAddress: 'BY ANISHHUSEN\nProfessional Kids Wear Store',
+  shopMobile: '+91 98765 43210',
+  headerText: 'BY ANISHHUSEN',
+  headerText2: 'Professional Billing System',
+  invoicePrefix: 'BILL',
+  invoiceTitle: 'TAX INVOICE',
+  currency: '₹',
+  gstNo: '',
+  enableGST: false,
+  gstRate: 18,
+  printerSize: '50mm',
+  paperWidth: 50,
+  defaultPayment: 'Cash',
+  themeColor: '#7c3aed',
+  fontSize: 16,
+  enableAnimation: true,
+  autoSave: true,
+  soundEnabled: true,
+  showCustomerName: true,
+  showCustomerMobile: false,
+  showCustomerAddress: false,
+  showCredit: true,
+  showDate: true,
+  autoCut: true,
+  printFormat: 'english',
+  businessLogo: '',
+  orderNo: '',
+  footerText: 'Thank You! Visit Again',
+  footerText2: 'Thank you for shopping with us!',
+  footerImage: '',
+  upiId: '',
+  fixedBillAmount: false,
+  defaultItemName: 'Item',
+  showUpiQr: true,
+  shopEmail: 'anmolchildrenwear@gmail.com'
+};
+
+settings = {...defaultSettings, ...settings};
+
+// State Management
+let currentBill = {
+  items: [],
+  customerName: '',
+  customerMobile: '',
+  customerAddress: '',
+  paymentMode: settings.defaultPayment,
+  total: 0,
+  subtotal: 0,
+  discount: 0,
+  discountPercent: 0,
+  gstAmount: 0,
+  notes: ''
+};
+let savedBills = JSON.parse(localStorage.getItem('kidsWearBills') || '[]');
+let itemsMaster = JSON.parse(localStorage.getItem('kidsWearItems') || '[]');
+let bluetoothDevice = null;
+let bluetoothCharacteristic = null;
+let paperSize = settings.printerSize;
+let currentBillForModal = null;
+let currentFilter = 'all';
+let editingItemIdx = -1;
+
+// Audio for sound effect
+const addSound = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSuBzvLZiTYIG2m98OScTgwOUarm7blmGgU7k9n1unEiBC13yO/eizEIHWq+8+OWT');
+
+function playSound() {
+  if(settings.soundEnabled) {
+    addSound.currentTime = 0;
+    addSound.play().catch(e => console.log('Sound play failed:', e));
+  }
+}
+
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+  applySettings();
+  loadSettingsToForm();
+  updateItemsList();
+  updateItemsDropdown();
+  updateSavedBillsList();
+  updateDailyTotal();
+  setPaymentMode(settings.defaultPayment);
+  showView('quickbill');
+  updateCustomerFieldsVisibility();
+  
+  // Quick Bill: default item name + focus rate
+  const defaultName = settings.defaultItemName || 'Item';
+  const itemNameEl = document.getElementById('itemName');
+  if(itemNameEl && !itemNameEl.value) itemNameEl.value = defaultName;
+  setTimeout(() => { const rateEl = document.getElementById('itemRate'); if(rateEl) rateEl.focus(); }, 100);
+  
+  if(itemsMaster.length === 0) {
+    itemsMaster = [
+      {name: 'T-Shirt', rate: 250, category: 'Shirts'},
+      {name: 'Jeans', rate: 600, category: 'Pants'},
+      {name: 'Frock', rate: 450, category: 'Frocks'},
+      {name: 'Shorts', rate: 200, category: 'Pants'},
+      {name: 'Sweater', rate: 500, category: 'Sweaters'},
+      {name: 'Shirt', rate: 350, category: 'Shirts'},
+      {name: 'Trouser', rate: 550, category: 'Pants'},
+      {name: 'Skirt', rate: 300, category: 'Frocks'}
+    ];
+    localStorage.setItem('kidsWearItems', JSON.stringify(itemsMaster));
+    updateItemsList();
+    updateItemsDropdown();
+  }
+});
+
+function applySettings() {
+  document.documentElement.style.setProperty('--primary', settings.themeColor);
+  document.documentElement.style.setProperty('--font-size-base', settings.fontSize + 'px');
+  document.getElementById('shopNameDisplay').textContent = settings.shopName;
+  document.getElementById('headerTextDisplay').textContent = settings.headerText || 'BY ANISHHUSEN';
+  document.getElementById('headerText2Display').textContent = settings.headerText2 || 'Professional Billing';
+  document.getElementById('currencyLabel').textContent = settings.currency;
+  
+  // Logo
+  if(settings.businessLogo) {
+    document.getElementById('headerLogo').innerHTML = `<img src="${settings.businessLogo}" class="w-12 h-12 rounded-xl object-cover" />`;
+  }
+  
+  if(!settings.enableAnimation) {
+    document.body.classList.add('no-animation');
+  } else {
+    document.body.classList.remove('no-animation');
+  }
+  
+  if(settings.enableGST) {
+    document.getElementById('gstSection').classList.remove('hidden');
+    document.getElementById('gstRateDisplay').textContent = settings.gstRate;
+  } else {
+    document.getElementById('gstSection').classList.add('hidden');
+  }
+}
+
+function updateCustomerFieldsVisibility() {
+  document.getElementById('customerMobile').classList.toggle('hidden', !settings.showCustomerMobile);
+  document.getElementById('customerAddress').classList.toggle('hidden', !settings.showCustomerAddress);
+  if(!settings.showCustomerName) {
+    document.getElementById('customerName').placeholder = 'Customer Name (Hidden in Bill)';
+  }
+}
+
+function loadSettingsToForm() {
+  document.getElementById('set-shopName').value = settings.shopName;
+  document.getElementById('set-shopAddress').value = settings.shopAddress;
+  document.getElementById('set-shopMobile').value = settings.shopMobile;
+  document.getElementById('set-headerText').value = settings.headerText || '';
+  document.getElementById('set-headerText2').value = settings.headerText2 || '';
+  document.getElementById('set-gstNo').value = settings.gstNo || '';
+  document.getElementById('set-invoiceTitle').value = settings.invoiceTitle || 'TAX INVOICE';
+  document.getElementById('set-invoicePrefix').value = settings.invoicePrefix;
+  document.getElementById('set-orderNo').value = settings.orderNo || '';
+  document.getElementById('set-footerText').value = settings.footerText || 'Thank You! Visit Again';
+  document.getElementById('set-footerText2').value = settings.footerText2 || '';
+  document.getElementById('set-upiId').value = settings.upiId || '';
+  document.getElementById('set-fixedBillAmount').checked = settings.fixedBillAmount || false;
+  document.getElementById('set-currency').value = settings.currency;
+  document.getElementById('set-enableGST').checked = settings.enableGST;
+  document.getElementById('set-gstRate').value = settings.gstRate;
+  document.getElementById('set-printerSize').value = settings.printerSize;
+  document.getElementById('set-printFormat').value = settings.printFormat || 'english';
+  document.getElementById('set-defaultPayment').value = settings.defaultPayment;
+  document.getElementById('set-themeColor').value = settings.themeColor;
+  document.getElementById('set-fontSize').value = settings.fontSize;
+  document.getElementById('set-enableAnimation').checked = settings.enableAnimation;
+  document.getElementById('set-autoSave').checked = settings.autoSave;
+  document.getElementById('set-soundEnabled').checked = settings.soundEnabled;
+  document.getElementById('set-showCustomerName').checked = settings.showCustomerName;
+  document.getElementById('set-showCustomerMobile').checked = settings.showCustomerMobile;
+  document.getElementById('set-showCustomerAddress').checked = settings.showCustomerAddress;
+  document.getElementById('set-showCredit').checked = settings.showCredit;
+  document.getElementById('set-showDate').checked = settings.showDate;
+  document.getElementById('set-autoCut').checked = settings.autoCut;
+  
+  if(settings.businessLogo) {
+    document.getElementById('logoPreview').src = settings.businessLogo;
+    document.getElementById('logoPreview').classList.remove('hidden');
+  }
+  if(settings.footerImage) {
+    document.getElementById('footerImagePreview').src = settings.footerImage;
+    document.getElementById('footerImagePreview').classList.remove('hidden');
+  }
+  generateUPIQR();
+}
+
+function handleLogoUpload(event) {
+  const file = event.target.files[0];
+  if(file) {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      settings.businessLogo = e.target.result;
+      document.getElementById('logoPreview').src = e.target.result;
+      document.getElementById('logoPreview').classList.remove('hidden');
+    };
+    reader.readAsDataURL(file);
+  }
+}
+
+function handleFooterImageUpload(event) {
+  const file = event.target.files[0];
+  if(file) {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      settings.footerImage = e.target.result;
+      document.getElementById('footerImagePreview').src = e.target.result;
+      document.getElementById('footerImagePreview').classList.remove('hidden');
+    };
+    reader.readAsDataURL(file);
+  }
+}
+
+function generateUPIQR() {
+  const upiId = document.getElementById('set-upiId').value.trim();
+  const fixedAmount = document.getElementById('set-fixedBillAmount').checked;
+  const qrDiv = document.getElementById('qrcodeUpi');
+  const qrText = document.getElementById('qrCodeText');
+  
+  if(!upiId) {
+    qrDiv.innerHTML = '';
+    qrText.textContent = 'Enter UPI ID to generate QR';
+    return;
+  }
+  
+  let upiUrl = `upi://pay?pa=${encodeURIComponent(upiId)}`;
+  
+  if(fixedAmount && currentBill.total > 0) {
+    upiUrl += `&am=${currentBill.total.toFixed(2)}&cu=INR`;
+    qrText.textContent = `Amount: ${settings.currency}${currentBill.total.toFixed(2)} (Fixed)`;
+  } else if(fixedAmount) {
+    qrText.textContent = 'Create a bill first to set fixed amount';
+  } else {
+    qrText.textContent = 'Dynamic Amount - Customer can enter';
+  }
+  
+  qrDiv.innerHTML = '';
+  new QRCode(qrDiv, {
+    text: upiUrl,
+    width: 120,
+    height: 120,
+    colorDark: "#000000",
+    colorLight: "#ffffff",
+    correctLevel: QRCode.CorrectLevel.H
+  });
+}
+
+function saveSettings() {
+  settings.shopName = document.getElementById('set-shopName').value || defaultSettings.shopName;
+  settings.shopAddress = document.getElementById('set-shopAddress').value || defaultSettings.shopAddress;
+  settings.shopMobile = document.getElementById('set-shopMobile').value || defaultSettings.shopMobile;
+  settings.headerText = document.getElementById('set-headerText').value;
+  settings.headerText2 = document.getElementById('set-headerText2').value;
+  settings.gstNo = document.getElementById('set-gstNo').value;
+  settings.invoiceTitle = document.getElementById('set-invoiceTitle').value || 'TAX INVOICE';
+  settings.invoicePrefix = document.getElementById('set-invoicePrefix').value || defaultSettings.invoicePrefix;
+  settings.orderNo = document.getElementById('set-orderNo').value;
+  settings.footerText = document.getElementById('set-footerText').value || 'Thank You! Visit Again';
+  settings.footerText2 = document.getElementById('set-footerText2').value;
+  settings.upiId = document.getElementById('set-upiId').value;
+  settings.fixedBillAmount = document.getElementById('set-fixedBillAmount').checked;
+  settings.currency = document.getElementById('set-currency').value || defaultSettings.currency;
+  settings.enableGST = document.getElementById('set-enableGST').checked;
+  settings.gstRate = parseFloat(document.getElementById('set-gstRate').value) || defaultSettings.gstRate;
+  settings.printerSize = document.getElementById('set-printerSize').value;
+  settings.printFormat = document.getElementById('set-printFormat').value;
+  settings.paperWidth = settings.printerSize === '50mm' ? 50 : 80;
+  settings.defaultPayment = document.getElementById('set-defaultPayment').value;
+  settings.themeColor = document.getElementById('set-themeColor').value;
+  settings.fontSize = parseInt(document.getElementById('set-fontSize').value);
+  settings.enableAnimation = document.getElementById('set-enableAnimation').checked;
+  settings.autoSave = document.getElementById('set-autoSave').checked;
+  settings.soundEnabled = document.getElementById('set-soundEnabled').checked;
+  settings.showCustomerName = document.getElementById('set-showCustomerName').checked;
+  settings.showCustomerMobile = document.getElementById('set-showCustomerMobile').checked;
+  settings.showCustomerAddress = document.getElementById('set-showCustomerAddress').checked;
+  settings.showCredit = document.getElementById('set-showCredit').checked;
+  settings.showDate = document.getElementById('set-showDate').checked;
+  settings.autoCut = document.getElementById('set-autoCut').checked;
+  
+  localStorage.setItem('kidsWearSettings', JSON.stringify(settings));
+  applySettings();
+  paperSize = settings.printerSize;
+  setPaymentMode(settings.defaultPayment);
+  updateBillDisplay();
+  updateCustomerFieldsVisibility();
+  generateUPIQR();
+  showToast('Settings saved successfully!');
+}
+
+function resetThemeColor() {
+  document.getElementById('set-themeColor').value = defaultSettings.themeColor;
+}
+
+// View Management
+function showView(view) {
+  document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
+  document.getElementById(`view-${view}`).classList.remove('hidden');
+  
+  document.querySelectorAll('.nav-btn').forEach(b => {
+    b.classList.remove('active');
+    b.classList.add('text-gray-500');
+  });
+  const navBtn = document.getElementById(`nav-${view}`);
+  if(navBtn) {
+    navBtn.classList.add('active');
+    navBtn.classList.remove('text-gray-500');
+  }
+  
+  if(view === 'printing') updatePrintBillsList();
+  if(view === 'savebill') updateSavedBillsList();
+}
+
+// Toast
+function showToast(msg, type = 'success') {
+  const toast = document.getElementById('toast');
+  const colors = {success: 'bg-green-600', error: 'bg-red-600', info: 'bg-blue-600'};
+  toast.className = `fixed bottom-24 left-1/2 -translate-x-1/2 ${colors[type]} text-white px-6 py-3 rounded-full shadow-2xl transition-all duration-300 z-50`;
+  toast.textContent = msg;
+  toast.style.opacity = '1';
+  setTimeout(() => { toast.style.opacity = '0'; }, 2500);
+}
+
+// Item Management
+function updateItemsList() {
+  const container = document.getElementById('itemsListContainer');
+  if(itemsMaster.length === 0) {
+    container.innerHTML = '<p class="text-center text-gray-400 py-8">No items added yet</p>';
+    return;
+  }
+  
+  const categories = {};
+  itemsMaster.forEach((item, idx) => {
+    if(!categories[item.category]) categories[item.category] = [];
+    categories[item.category].push({...item, idx});
+  });
+  
+  container.innerHTML = Object.keys(categories).map(cat => `
+    <div class="mb-3">
+      <h4 class="text-xs font-bold text-violet-600 mb-2 px-2">${cat}</h4>
+      ${categories[cat].map(item => `
+        <div class="flex items-center justify-between bg-white p-3 rounded-xl border-2 border-purple-100 mb-2 hover:shadow-md transition-all">
+          <div>
+            <p class="font-semibold text-gray-800">${item.name}</p>
+            <p class="text-sm text-violet-600 font-bold">${settings.currency}${item.rate.toFixed(2)}</p>
+          </div>
+          <button onclick="deleteItem(${item.idx})" class="text-red-500 hover:text-red-600 p-2 bg-red-50 rounded-lg">
+            <i class="fa-solid fa-trash"></i>
+          </button>
+        </div>
+      `).join('')}
+    </div>
+  `).join('');
+}
+
+function updateItemsDropdown() {
+  const datalist = document.getElementById('itemsList');
+  datalist.innerHTML = itemsMaster.map(i => 
+    `<option value="${i.name}" data-rate="${i.rate}">${i.name} - ${settings.currency}${i.rate}</option>`
+  ).join('');
+}
+
+function addItem() {
+  const name = document.getElementById('newItemName').value.trim();
+  const rate = parseFloat(document.getElementById('newItemRate').value);
+  const category = document.getElementById('newItemCategory').value;
+  
+  if(!name || !rate || rate <= 0) {
+    showToast('Enter valid item name and rate', 'error');
+    return;
+  }
+  
+  if(itemsMaster.find(i => i.name.toLowerCase() === name.toLowerCase())) {
+    showToast('Item already exists', 'error');
+    return;
+  }
+  
+  itemsMaster.push({name, rate, category});
+  localStorage.setItem('kidsWearItems', JSON.stringify(itemsMaster));
+  document.getElementById('newItemName').value = '';
+  document.getElementById('newItemRate').value = '';
+  updateItemsList();
+  updateItemsDropdown();
+  showToast('Item added successfully');
+}
+
+function deleteItem(idx) {
+  if(confirm('Delete this item?')) {
+    itemsMaster.splice(idx, 1);
+    localStorage.setItem('kidsWearItems', JSON.stringify(itemsMaster));
+    updateItemsList();
+    updateItemsDropdown();
+    showToast('Item deleted');
+  }
+}
+
+// On item select change - auto-fill rate if exists, otherwise allow manual entry
+function onItemSelectChange() {
+  const input = document.getElementById('itemName');
+  const itemName = input.value.trim();
+  const existingItem = itemsMaster.find(i => i.name.toLowerCase() === itemName.toLowerCase());
+  
+  if(existingItem) {
+    document.getElementById('itemRate').value = existingItem.rate;
+    setTimeout(() => {
+      document.getElementById('itemRate').focus();
+      document.getElementById('itemRate').select();
+    }, 50);
+  } else {
+    // Manual entry - focus rate
+    setTimeout(() => {
+      document.getElementById('itemRate').focus();
+    }, 50);
+  }
+}
+
+// Bill Management
+function addOrUpdateBillItem() {
+  const name = document.getElementById('itemName').value.trim();
+  const qty = parseInt(document.getElementById('itemQty').value) || 1;
+  const rate = parseFloat(document.getElementById('itemRate').value) || 0;
+  
+  if(!name || rate <= 0) {
+    showToast('Enter item name and valid rate', 'error');
+    return;
+  }
+  
+  if(editingItemIdx >= 0) {
+    // Update existing item
+    currentBill.items[editingItemIdx] = {name, qty, rate, total: qty * rate};
+    editingItemIdx = -1;
+    document.getElementById('addBtnText').textContent = 'Add';
+    document.getElementById('addItemBtn').innerHTML = '<i class="fa-solid fa-plus mr-1"></i><span id="addBtnText">Add</span>';
+    showToast('Item updated');
+  } else {
+    // Add new item
+    currentBill.items.push({name, qty, rate, total: qty * rate});
+    playSound();
+    showToast('Item added');
+  }
+  
+  const defaultName = settings.defaultItemName || 'Item';
+  document.getElementById('itemName').value = defaultName;
+  document.getElementById('itemQty').value = '1';
+  document.getElementById('itemRate').value = '';
+  updateBillDisplay();
+  setTimeout(() => {
+    const rateEl = document.getElementById('itemRate');
+    if(rateEl){ rateEl.focus(); rateEl.select(); }
+  }, 50);
+}
+
+function editBillItem(idx) {
+  const item = currentBill.items[idx];
+  document.getElementById('itemName').value = item.name;
+  document.getElementById('itemQty').value = item.qty;
+  document.getElementById('itemRate').value = item.rate;
+  editingItemIdx = idx;
+  document.getElementById('addBtnText').textContent = 'Update';
+  document.getElementById('addItemBtn').innerHTML = '<i class="fa-solid fa-check mr-1"></i><span id="addBtnText">Update</span>';
+  document.getElementById('itemRate').focus();
+}
+
+function removeBillItem(idx) {
+  if(editingItemIdx === idx) {
+    editingItemIdx = -1;
+    document.getElementById('addBtnText').textContent = 'Add';
+    document.getElementById('addItemBtn').innerHTML = '<i class="fa-solid fa-plus mr-1"></i><span id="addBtnText">Add</span>';
+  }
+  currentBill.items.splice(idx, 1);
+  updateBillDisplay();
+}
+
+function updateBillDisplay() {
+  const tbody = document.getElementById('billItems');
+  const empty = document.getElementById('emptyBill');
+  
+  if(currentBill.items.length === 0) {
+    tbody.innerHTML = '';
+    empty.classList.remove('hidden');
+    document.getElementById('billTotal').textContent = `${settings.currency}0`;
+    document.getElementById('subtotalDisplay').textContent = `${settings.currency}0`;
+    currentBill.total = 0;
+    currentBill.subtotal = 0;
+    generateUPIQR();
+    return;
+  }
+  
+  empty.classList.add('hidden');
+  
+  // Calculate subtotal
+  currentBill.subtotal = currentBill.items.reduce((sum, item) => sum + item.total, 0);
+  
+  // Calculate discount
+  const discountPercent = parseFloat(document.getElementById('discountPercent').value) || 0;
+  const discountAmount = parseFloat(document.getElementById('discountAmount').value) || 0;
+  
+  if(discountPercent > 0) {
+    currentBill.discount = (currentBill.subtotal * discountPercent / 100);
+    document.getElementById('discountAmount').value = currentBill.discount.toFixed(2);
+  } else if(discountAmount > 0) {
+    currentBill.discount = discountAmount;
+  } else {
+    currentBill.discount = 0;
+  }
+  
+  currentBill.discountPercent = discountPercent;
+  
+  // Calculate total after discount
+  let totalAfterDiscount = currentBill.subtotal - currentBill.discount;
+  
+  // Calculate GST if enabled
+  if(settings.enableGST) {
+    currentBill.gstAmount = totalAfterDiscount * (settings.gstRate / 100);
+    currentBill.total = totalAfterDiscount + currentBill.gstAmount;
+    document.getElementById('gstRow').style.display = 'flex';
+    document.getElementById('gstTotalDisplay').textContent = `${settings.currency}${currentBill.gstAmount.toFixed(2)}`;
+    document.getElementById('gstAmountDisplay').textContent = `${settings.currency}${currentBill.gstAmount.toFixed(2)}`;
+  } else {
+    currentBill.gstAmount = 0;
+    currentBill.total = totalAfterDiscount;
+    document.getElementById('gstRow').style.display = 'none';
+  }
+  
+  tbody.innerHTML = currentBill.items.map((item, idx) => `
+    <tr class="hover:bg-purple-50 transition-colors ${editingItemIdx === idx ? 'bg-violet-50' : ''}">
+      <td class="p-3 text-gray-500">${idx + 1}</td>
+      <td class="p-3 font-medium">${item.name}</td>
+      <td class="p-3 text-center">${item.qty}</td>
+      <td class="p-3 text-right">${settings.currency}${item.rate.toFixed(2)}</td>
+      <td class="p-3 text-right font-bold text-violet-600">${settings.currency}${item.total.toFixed(2)}</td>
+      <td class="p-3 text-center">
+        <button onclick="editBillItem(${idx})" class="text-blue-500 hover:text-blue-600 bg-blue-50 p-2 rounded-lg mr-1">
+          <i class="fa-solid fa-pen text-sm"></i>
+        </button>
+        <button onclick="removeBillItem(${idx})" class="text-red-500 hover:text-red-600 bg-red-50 p-2 rounded-lg">
+          <i class="fa-solid fa-trash text-sm"></i>
+        </button>
+      </td>
+    </tr>
+  `).join('');
+  
+  document.getElementById('subtotalDisplay').textContent = `${settings.currency}${currentBill.subtotal.toFixed(2)}`;
+  
+  if(currentBill.discount > 0) {
+    document.getElementById('discountRow').style.display = 'flex';
+    document.getElementById('discountDisplay').textContent = `-${settings.currency}${currentBill.discount.toFixed(2)}`;
+  } else {
+    document.getElementById('discountRow').style.display = 'none';
+  }
+  
+  document.getElementById('billTotal').textContent = `${settings.currency}${currentBill.total.toFixed(2)}`;
+  
+  // Update QR code with new amount
+  if(settings.upiId && settings.fixedBillAmount) {
+    generateUPIQR();
+  }
+}
+
+function setPaymentMode(mode) {
+  currentBill.paymentMode = mode;
+  document.querySelectorAll('.pay-btn').forEach(b => {
+    b.classList.remove('from-green-500', 'to-emerald-500', 'from-orange-500', 'to-amber-500', 'from-blue-500', 'to-indigo-500', 'text-white');
+    b.classList.add('bg-gray-200', 'text-gray-600');
+  });
+  const btn = document.getElementById(`pay-${mode}`);
+  btn.classList.remove('bg-gray-200', 'text-gray-600');
+  btn.classList.add('text-white', 'shadow-xl');
+  
+  if(mode === 'Cash') btn.classList.add('from-green-500', 'to-emerald-500');
+  else if(mode === 'UPI') btn.classList.add('from-blue-500', 'to-indigo-500');
+  else btn.classList.add('from-orange-500', 'to-amber-500');
+}
+
+function clearCurrentBill() {
+  if(currentBill.items.length > 0 && !confirm('Clear current bill?')) return;
+  editingBillIdx = -1;
+  currentBill = {
+    items: [], 
+    customerName: '', 
+    customerMobile: '',
+    customerAddress: '',
+    paymentMode: settings.defaultPayment, 
+    total: 0,
+    subtotal: 0,
+    discount: 0,
+    discountPercent: 0,
+    gstAmount: 0,
+    notes: ''
+  };
+  editingItemIdx = -1;
+  document.getElementById('customerName').value = '';
+  document.getElementById('customerMobile').value = '';
+  document.getElementById('customerAddress').value = '';
+  document.getElementById('discountPercent').value = '0';
+  document.getElementById('discountAmount').value = '0';
+  document.getElementById('billNotes').value = '';
+  document.getElementById('addBtnText').textContent = 'Add';
+  document.getElementById('addItemBtn').innerHTML = '<i class="fa-solid fa-plus mr-1"></i><span id="addBtnText">Add</span>';
+  setPaymentMode(settings.defaultPayment);
+  updateBillDisplay();
+  // reset quick bill fields
+  const defaultName2 = settings.defaultItemName || 'Item';
+  const inEl = document.getElementById('itemName'); if(inEl) inEl.value = defaultName2;
+  const rateEl = document.getElementById('itemRate'); if(rateEl){ rateEl.value=''; setTimeout(()=>rateEl.focus(),50); }
+}
+
+function saveBill() {
+  if(currentBill.items.length === 0) {
+    showToast('Add items to bill first', 'error');
+    return null;
+  }
+  
+  currentBill.customerName = document.getElementById('customerName').value.trim() || 'Walk-in Customer';
+  currentBill.customerMobile = document.getElementById('customerMobile').value.trim();
+  currentBill.customerAddress = document.getElementById('customerAddress').value.trim();
+  currentBill.notes = document.getElementById('billNotes').value.trim();
+  
+  const now = new Date();
+  const bill = {
+    ...JSON.parse(JSON.stringify(currentBill)),
+    billNo: `${settings.invoicePrefix}${Date.now()}`,
+    date: now.toISOString(),
+    dateString: now.toLocaleDateString(),
+    timeString: now.toLocaleTimeString(),
+    timestamp: Date.now(),
+    shopName: settings.shopName,
+    shopAddress: settings.shopAddress,
+    shopMobile: settings.shopMobile,
+    invoiceTitle: settings.invoiceTitle,
+    gstNo: settings.gstNo,
+    footerText: settings.footerText,
+    footerText2: settings.footerText2,
+    isGST: settings.enableGST,
+    gstRate: settings.gstRate,
+    printerSize: settings.printerSize,
+    orderNo: settings.orderNo,
+    businessLogo: settings.businessLogo,
+    footerImage: settings.footerImage,
+    headerText: settings.headerText,
+    headerText2: settings.headerText2,
+    upiId: settings.upiId,
+    printFormat: settings.printFormat,
+    autoCut: settings.autoCut
+  };
+  
+  savedBills.unshift(bill);
+  if(settings.autoSave) {
+    localStorage.setItem('kidsWearBills', JSON.stringify(savedBills));
+  }
+  showToast('Bill saved successfully');
+  updateDailyTotal();
+  updateSavedBillsList();
+  generateUPIQR(); // Update QR with new bill amount
+  return bill; // Don't clear immediately for manual clear
+}
+
+function saveBillAndPrint() {
+  const bill = saveBill();
+  if(bill) {
+    setTimeout(() => printBill(bill), 500);
+    clearCurrentBill();
+  }
+}
+
+// Saved Bills
+function filterSavedBills(type) {
+  currentFilter = type;
+  document.querySelectorAll('.filter-btn').forEach(b => {
+    b.classList.remove('bg-violet-600', 'text-white');
+    b.classList.add('bg-gray-200', 'text-gray-600');
+  });
+  event.target.classList.remove('bg-gray-200', 'text-gray-600');
+  event.target.classList.add('bg-violet-600', 'text-white');
+  filterBills();
+}
+
+function updateSavedBillsList() {
+  filterBills();
+}
+
+function filterBills() {
+  const query = document.getElementById('searchBills')?.value.toLowerCase() || '';
+  let filtered = savedBills;
+  
+  if(currentFilter !== 'all') {
+    filtered = filtered.filter(b => b.paymentMode === currentFilter);
+  }
+  
+  if(query) {
+    filtered = filtered.filter(b => 
+      b.billNo.toLowerCase().includes(query) || 
+      b.customerName.toLowerCase().includes(query)
+    );
+  }
+  
+  const container = document.getElementById('savedBillsList');
+  if(!container) return;
+  
+  if(filtered.length === 0) {
+    container.innerHTML = '<p class="text-center text-gray-400 py-8">No bills found</p>';
+    return;
+  }
+  
+  container.innerHTML = filtered.map((bill) => {
+    const idx = savedBills.indexOf(bill);
+    return `
+    <div class="colorful-card rounded-2xl p-4 hover:shadow-xl transition-all">
+      <div class="flex justify-between items-start mb-3">
+        <div>
+          <p class="font-bold text-gray-800 text-lg">${bill.billNo}</p>
+          <p class="text-sm text-gray-600">${bill.customerName}</p>
+          <p class="text-xs text-gray-500 mt-1">
+            <i class="fa-solid fa-calendar mr-1"></i>${bill.dateString || new Date(bill.date).toLocaleDateString()}
+            <i class="fa-solid fa-clock ml-2 mr-1"></i>${bill.timeString || new Date(bill.date).toLocaleTimeString()}
+          </p>
+          ${bill.isGST ? `<p class="text-xs text-blue-600 font-semibold mt-1">GST: ${bill.gstRate}%</p>` : ''}
+          ${bill.items && bill.items.length > 0 ? `<p class="text-xs text-gray-500 mt-1">${bill.items.length} items</p>` : ''}
+        </div>
+        <div class="text-right">
+          <p class="text-2xl font-bold text-violet-600">${settings.currency}${bill.total.toFixed(2)}</p>
+          <span class="text-xs px-3 py-1 rounded-full font-semibold ${getPaymentBadge(bill.paymentMode)}">${bill.paymentMode}</span>
+        </div>
+      </div>
+      <div class="flex gap-2">
+        <button onclick="viewBill(${idx})" class="flex-1 bg-violet-100 text-violet-600 py-2 rounded-xl text-sm font-bold hover:bg-violet-200 transition-all">
+          <i class="fa-solid fa-eye mr-1"></i>View
+        </button>
+        <button onclick="printBill(savedBills[${idx}])" class="flex-1 bg-blue-100 text-blue-600 py-2 rounded-xl text-sm font-bold hover:bg-blue-200 transition-all">
+          <i class="fa-solid fa-print mr-1"></i>Print
+        </button>
+        <button onclick="deleteBill(${idx})" class="bg-red-100 text-red-600 px-3 py-2 rounded-xl text-sm font-bold hover:bg-red-200 transition-all">
+          <i class="fa-solid fa-trash"></i>
+        </button>
+      </div>
+    </div>
+  `}).join('');
+}
+
+function getPaymentBadge(mode) {
+  const badges = {
+    Cash: 'bg-green-100 text-green-700',
+    UPI: 'bg-blue-100 text-blue-700',
+    Credit: 'bg-orange-100 text-orange-700'
+  };
+  return badges[mode] || 'bg-gray-100 text-gray-700';
+}
+
+function deleteBill(idx) {
+  if(confirm('Delete this bill?')) {
+    savedBills.splice(idx, 1);
+    localStorage.setItem('kidsWearBills', JSON.stringify(savedBills));
+    updateSavedBillsList();
+    updateDailyTotal();
+    showToast('Bill deleted');
+  }
+}
+
+function viewBill(idx) {
+  const bill = savedBills[idx];
+  currentBillForModal = bill;
+  document.getElementById('billPreviewContent').innerHTML = generateBillHTML(bill);
+  document.getElementById('billModal').classList.remove('hidden');
+  document.getElementById('billModal').classList.add('flex');
+  
+  // Generate QR in modal if UPI enabled
+  if(bill.upiId && settings.fixedBillAmount) {
+    setTimeout(() => {
+      const qrDiv = document.querySelector('#billModal #qrcode');
+      if(qrDiv) {
+        const upiUrl = `upi://pay?pa=${bill.upiId}&am=${bill.total.toFixed(2)}&cu=INR`;
+        new QRCode(qrDiv, {
+          text: upiUrl,
+          width: 80,
+          height: 80
+        });
+      }
+    }, 100);
+  }
+}
+
+function closeBillModal() {
+  document.getElementById('billModal').classList.add('hidden');
+  document.getElementById('billModal').classList.remove('flex');
+}
+
+// Printing
+function setPaperSize(size) {
+  paperSize = size;
+  document.querySelectorAll('.paper-btn').forEach(b => {
+    b.classList.remove('bg-violet-600', 'text-white');
+    b.classList.add('bg-gray-200', 'text-gray-600');
+  });
+  document.getElementById(`paper-${size}`).classList.remove('bg-gray-200', 'text-gray-600');
+  document.getElementById(`paper-${size}`).classList.add('bg-violet-600', 'text-white');
+}
+
+function updatePrintBillsList() {
+  const container = document.getElementById('printBillsList');
+  if(savedBills.length === 0) {
+    container.innerHTML = '<p class="text-center text-gray-400 py-8">No bills to print</p>';
+    return;
+  }
+  
+  container.innerHTML = savedBills.slice(0, 10).map((bill, idx) => `
+    <div class="flex items-center justify-between bg-white p-3 rounded-xl border-2 border-purple-100 hover:shadow-md transition-all">
+      <div class="flex-1 min-w-0">
+        <p class="font-bold text-sm">${bill.billNo}</p>
+        <p class="text-xs text-gray-600 truncate">${bill.customerName} - ${settings.currency}${bill.total.toFixed(2)}</p>
+      </div>
+      <button onclick="printBill(savedBills[${idx}])" class="bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white px-4 py-2 rounded-xl text-sm font-bold ml-2 shadow-lg">
+        <i class="fa-solid fa-print"></i>
+      </button>
+    </div>
+  `).join('');
+}
+
+async function connectBluetooth() {
+  if (!navigator.bluetooth) {
+    showToast('Bluetooth not supported on this browser. Use Chrome on Android.', 'error');
+    return;
+  }
+  
+  try {
+    document.getElementById('btStatus').innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>Searching for printers...';
+    bluetoothDevice = await navigator.bluetooth.requestDevice({
+      filters: [{ services: ['000018f0-0000-1000-8000-00805f9b34fb'] }, { namePrefix: 'Printer' }, { namePrefix: 'POS' }],
+      optionalServices: ['000018f0-0000-1000-8000-00805f9b34fb', '00001101-0000-1000-8000-00805f9b34fb']
+    });
+    
+    document.getElementById('btStatus').innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>Connecting...';
+    const server = await bluetoothDevice.gatt.connect();
+    
+    let service;
+    try {
+      service = await server.getPrimaryService('000018f0-0000-1000-8000-00805f9b34fb');
+      bluetoothCharacteristic = await service.getCharacteristic('00002af1-0000-1000-8000-00805f9b34fb');
+    } catch(e) {
+      service = await server.getPrimaryService('00001101-0000-1000-8000-00805f9b34fb').catch(() => null);
+      if(service) {
+        const characteristics = await service.getCharacteristics();
+        bluetoothCharacteristic = characteristics[0];
+      }
+    }
+    
+    if(!bluetoothCharacteristic) {
+      throw new Error('Printer characteristic not found');
+    }
+    
+    document.getElementById('btStatus').innerHTML = `<span class="text-green-600 font-semibold"><i class="fa-solid fa-check-circle mr-1"></i>Connected to ${bluetoothDevice.name || 'Printer'}</span>`;
+    showToast('Printer connected successfully');
+  } catch (error) {
+    document.getElementById('btStatus').innerHTML = `<span class="text-red-600 font-semibold"><i class="fa-solid fa-xmark-circle mr-1"></i>Connection failed</span>`;
+    showToast('Failed to connect: ' + error.message, 'error');
+  }
+}
+
+async function printBill(bill) {
+  if(!bluetoothCharacteristic) {
+    showToast('Connect printer first', 'info');
+    showView('printing');
+    return;
+  }
+  
+  try {
+    const commands = generateESCPOSCommands(bill);
+    const encoder = new TextEncoder();
+    const chunks = [];
+    const chunkSize = 100;
+    
+    for(let i = 0; i < commands.length; i += chunkSize) {
+      chunks.push(commands.slice(i, i + chunkSize));
+    }
+    
+    for(const chunk of chunks) {
+      await bluetoothCharacteristic.writeValue(encoder.encode(chunk));
+      await new Promise(resolve => setTimeout(resolve, 80));
+    }
+    
+    showToast('Bill sent to printer successfully');
+  } catch (error) {
+    showToast('Print failed: ' + error.message, 'error');
+  }
+}
+
+function generateESCPOSCommands(bill) {
+  const ESC = '\x1B';
+  const GS = '\x1D';
+  const LF = '\x0A';
+  const size = bill.printerSize || paperSize || settings.printerSize;
+  const width = size === '50mm' ? 32 : 42;
+  
+  let cmd = ESC + '@'; // Initialize
+  cmd += ESC + 'a' + '\x01'; // Center align
+  cmd += ESC + 'E' + '\x01'; // Bold on
+  cmd += ESC + '!' + '\x10'; // Double height
+  cmd += (bill.shopName || settings.shopName) + LF;
+  cmd += ESC + '!' + '\x00'; // Normal size
+  cmd += ESC + 'E' + '\x00'; // Bold off
+  
+  // Header Text 1 & 2
+  if(bill.headerText) cmd += bill.headerText + LF;
+  if(bill.headerText2) cmd += bill.headerText2 + LF;
+  
+  cmd += 'Mob: ' + (bill.shopMobile || settings.shopMobile) + LF;
+  if(bill.gstNo) cmd += 'GST: ' + bill.gstNo + LF;
+  cmd += ESC + 'E' + '\x01';
+  cmd += bill.invoiceTitle || 'BILL';
+  cmd += ESC + 'E' + '\x00' + LF;
+  
+  cmd += '='.repeat(width) + LF;
+  cmd += ESC + 'a' + '\x00'; // Left align
+  
+  // Invoice & Order No
+  cmd += `Bill: ${bill.billNo}` + LF;
+  if(bill.orderNo) cmd += `Order: ${bill.orderNo}` + LF;
+  
+  // Date
+  if(settings.showDate !== false) {
+    cmd += `Date: ${new Date(bill.date).toLocaleString()}` + LF;
+  }
+  
+  // Customer Details
+  if(settings.showCustomerName !== false && bill.customerName && bill.customerName !== 'Walk-in Customer') {
+    cmd += `Customer: ${bill.customerName}` + LF;
+  }
+  if(settings.showCustomerMobile && bill.customerMobile) {
+    cmd += `Mobile: ${bill.customerMobile}` + LF;
+  }
+  if(settings.showCustomerAddress && bill.customerAddress) {
+    cmd += `Address: ${bill.customerAddress}` + LF;
+  }
+  
+  cmd += '-'.repeat(width) + LF;
+  
+  bill.items.forEach(item => {
+    const name = item.name.substring(0, width - 2);
+    cmd += name + LF;
+    const line = `${item.qty} x ${item.rate.toFixed(2)} = ${settings.currency}${item.total.toFixed(2)}`;
+    cmd += line.padStart(width) + LF;
+  });
+  
+  cmd += '-'.repeat(width) + LF;
+  cmd += `Subtotal:${settings.currency}${bill.subtotal.toFixed(2)}`.padStart(width) + LF;
+  
+  if(bill.discount > 0) {
+    cmd += `Discount:${settings.currency}${bill.discount.toFixed(2)}`.padStart(width) + LF;
+  }
+  
+  if(bill.isGST && bill.gstAmount > 0) {
+    cmd += `GST ${bill.gstRate}%:${settings.currency}${bill.gstAmount.toFixed(2)}`.padStart(width) + LF;
+  }
+  
+  cmd += '='.repeat(width) + LF;
+  cmd += ESC + 'E' + '\x01'; // Bold on
+  cmd += ESC + '!' + '\x08'; // Emphasized
+  const totalLine = `TOTAL: ${settings.currency}${bill.total.toFixed(2)}`;
+  cmd += totalLine.padStart(width) + LF;
+  cmd += ESC + '!' + '\x00'; // Normal
+  cmd += ESC + 'E' + '\x00'; // Bold off
+  cmd += `Payment: ${bill.paymentMode}` + LF;
+  if(bill.notes) {
+    cmd += `Note: ${bill.notes}` + LF;
+  }
+  cmd += '='.repeat(width) + LF;
+  cmd += ESC + 'a' + '\x01'; // Center
+  
+  // UPI QR Code section
+  if(bill.upiId && settings.fixedBillAmount) {
+    cmd += 'Scan to Pay:' + LF;
+    cmd += GS + 'h' + '\x40'; // QR height
+    cmd += GS + 'k' + '\x09'; // QR Code
+    const upiData = `upi://pay?pa=${bill.upiId}&am=${bill.total.toFixed(2)}&cu=INR`;
+    cmd += String.fromCharCode(upiData.length & 0xFF, (upiData.length >> 8) & 0xFF) + upiData + LF;
+  }
+  
+  // Footer Text
+  cmd += ESC + 'E' + '\x01';
+  cmd += (bill.footerText || 'Thank You! Visit Again') + LF;
+  cmd += ESC + 'E' + '\x00';
+  if(bill.footerText2) {
+    cmd += bill.footerText2 + LF;
+  }
+  
+  cmd += LF + LF + LF;
+  
+  // Auto Cut
+  if(settings.autoCut !== false) {
+    cmd += GS + 'V' + '\x42' + '\x00'; // Cut paper
+  }
+  
+  return cmd;
+}
+
+// PDF & Share
+function generateBillHTML(bill) {
+  const shopName = bill.shopName || settings.shopName || 'ANMOL CHILDRENWEAR';
+  const shopAddr = ((bill.shopAddress || settings.shopAddress || 'DOSHIHAT, KAPAD BAZAR, DHOLKA, AHMEDABAD 382225').replace(/\n/g,'<br>'));
+  const shopMobile = bill.shopMobile || settings.shopMobile || '+91 98765 43210';
+  const shopEmail = settings.shopEmail || '';
+  const logo = bill.businessLogo || settings.businessLogo || '';
+  const logoHtml = logo ? '<div style="text-align:center;margin-bottom:8px"><img src="'+logo+'" style="max-height:60px;max-width:180px;object-fit:contain;margin:0 auto;display:block" crossorigin="anonymous" /></div>' : '';
+  const d = new Date(bill.date);
+  const dateStr = d.toLocaleDateString('en-GB').replace(/\//g,'-') + ' ' + d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
+  let rows = '';
+  bill.items.forEach((it, i)=>{
+    rows += '<tr><td style="padding:4px 4px">'+(i+1)+'</td><td style="padding:4px 4px">'+it.name+'</td><td style="text-align:center">'+it.qty+'</td><td style="text-align:right">'+it.rate.toFixed(2)+'</td><td style="text-align:right">'+it.total.toFixed(2)+'</td></tr>';
+  });
+  const upiId = bill.upiId || settings.upiId || '';
+  const showQr = !!upiId;
+  const qrHtml = showQr ? '<div style="text-align:center;margin:12px 0"><div id="billQrHolder" style="display:flex;justify-content:center;align-items:center;margin:0 auto"></div><p style="font-size:11px;margin:4px 0">Scan to Pay UPI<br>'+upiId+'<br>Amount: ₹ '+bill.total.toFixed(2)+'</p></div>' : '<p style="text-align:center;font-size:13px">Payment Mode<br>'+bill.paymentMode+' : ₹ '+bill.total.toFixed(2)+'</p>';
+  const totalQty = bill.items.reduce((s,i)=>s+i.qty,0);
+  const footerImg = bill.footerImage || settings.footerImage || '';
+  const footerImgHtml = footerImg ? '<div style="text-align:center;margin-top:8px"><img src="'+footerImg+'" style="max-height:40px;max-width:200px;object-fit:contain;margin:0 auto;display:block" crossorigin="anonymous" /></div>' : '';
+  return '<div id="billCaptureArea" style="background:#fff;color:#000;font-family:system-ui,sans-serif;max-width:380px;margin:0 auto;padding:12px">'+
+    logoHtml+
+    '<div style="text-align:center;font-weight:800;font-size:18px">'+shopName+'</div>'+
+    '<div style="text-align:center;font-size:12px;color:#333;margin:4px 0">'+shopAddr+'<br>'+shopMobile+(shopEmail?'<br>'+shopEmail:'')+'</div>'+
+    '<div style="text-align:center;font-weight:600;margin:10px 0;font-size:14px">'+(bill.invoiceTitle||'TAX INVOICE')+'</div>'+
+    '<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px"><span>Bill: '+bill.billNo+'</span><span>'+dateStr+'</span></div>'+
+    (bill.customerName && bill.customerName!=='Walk-in Customer' ? '<div style="font-size:12px;margin-bottom:6px">Customer: '+bill.customerName+'</div>' : '')+
+    '<table style="width:100%;border-collapse:collapse;font-size:12px"><tr style="border-top:1px dashed #999;border-bottom:1px dashed #999"><th align="left">#</th><th align="left">Item</th><th>Qty</th><th align="right">Rate</th><th align="right">Total</th></tr>'+
+    rows+
+    '<tr style="border-top:1px dashed #999"><td colspan="2"></td><td style="text-align:center">'+totalQty+'</td><td></td><td style="text-align:right;font-weight:bold">'+bill.total.toFixed(2)+'</td></tr></table>'+
+    '<div style="text-align:center;font-size:18px;font-weight:700;margin:12px 0;border-top:1px dashed #999;border-bottom:1px dashed #999;padding:8px 0">Grand Total : ₹ '+bill.total.toFixed(2)+'</div>'+
+    qrHtml+
+    '<div style="text-align:center;margin-top:10px;font-size:12px;color:#555">'+(bill.footerText||'Thank You! Visit Again')+(bill.footerText2?'<br>'+bill.footerText2:'')+'</div>'+
+    footerImgHtml+
+    '</div>';
+}
+
+
+function downloadPDF() {
+  if(!currentBillForModal) return;
+  
+  const size = currentBillForModal.printerSize || settings.printerSize;
+  const width = size === '50mm' ? 50 : 80;
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: [width, 250]
+  });
+  
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(10);
+  
+  let y = 10;
+  const centerX = width / 2;
+  const currency = settings.currency;
+  
+  // Header
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'bold');
+  doc.text(currentBillForModal.shopName || settings.shopName, centerX, y, {align: 'center'});
+  y += 4;
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  
+  if(currentBillForModal.headerText || currentBillForModal.headerText2) {
+    if(currentBillForModal.headerText) doc.text(currentBillForModal.headerText, centerX, y, {align: 'center'}), y += 3;
+    if(currentBillForModal.headerText2) doc.text(currentBillForModal.headerText2, centerX, y, {align: 'center'}), y += 3;
+  }
+  
+  doc.text('Mob: ' + (currentBillForModal.shopMobile || settings.shopMobile), centerX, y, {align: 'center'});
+  y += 3;
+  if(currentBillForModal.gstNo) {
+    doc.text('GST: ' + currentBillForModal.gstNo, centerX, y, {align: 'center'});
+    y += 3;
+  }
+  doc.setFont('helvetica', 'bold');
+  doc.text(currentBillForModal.invoiceTitle || (currentBillForModal.isGST ? 'INVOICE' : 'BILL'), centerX, y, {align: 'center'});
+  y += 2;
+  doc.line(2, y, width - 2, y);
+  y += 4;
+  
+  // Bill Info
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.text(`Bill: ${currentBillForModal.billNo}`, 2, y); y += 3;
+  if(currentBillForModal.orderNo) doc.text(`Order: ${currentBillForModal.orderNo}`, 2, y), y += 3;
+  if(settings.showDate !== false) doc.text(`Date: ${new Date(currentBillForModal.date).toLocaleString()}`, 2, y), y += 3;
+  if(settings.showCustomerName !== false && currentBillForModal.customerName && currentBillForModal.customerName !== 'Walk-in Customer') {
+    doc.text(`Customer: ${currentBillForModal.customerName}`, 2, y), y += 3;
+  }
+  if(settings.showCustomerMobile && currentBillForModal.customerMobile) {
+    doc.text(`Mobile: ${currentBillForModal.customerMobile}`, 2, y), y += 3;
+  }
+  if(settings.showCustomerAddress && currentBillForModal.customerAddress) {
+    doc.text(`Address: ${currentBillForModal.customerAddress}`, 2, y), y += 3;
+  }
+  doc.line(2, y, width - 2, y);
+  y += 4;
+  
+  // Items
+  currentBillForModal.items.forEach(item => {
+    doc.setFont('helvetica', 'bold');
+    const splitName = doc.splitTextToSize(item.name, width - 4);
+    splitName.forEach(line => {
+      doc.text(line, 2, y);
+      y += 3;
+    });
+    doc.setFont('helvetica', 'normal');
+    const line = `${item.qty} x ${item.rate.toFixed(2)} = ${currency}${item.total.toFixed(2)}`;
+    doc.text(line, width - 2, y, {align: 'right'}); y += 4;
+  });
+  
+  doc.line(2, y, width - 2, y);
+  y += 4;
+  
+  // Totals
+  doc.text(`Subtotal: ${currency}${currentBillForModal.subtotal.toFixed(2)}`, width - 2, y, {align: 'right'}); y += 3;
+  if(currentBillForModal.discount > 0) {
+    doc.text(`Discount: -${currency}${currentBillForModal.discount.toFixed(2)}`, width - 2, y, {align: 'right'}); y += 3;
+  }
+  if(currentBillForModal.isGST && currentBillForModal.gstAmount > 0) {
+    doc.text(`GST ${currentBillForModal.gstRate}%: ${currency}${currentBillForModal.gstAmount.toFixed(2)}`, width - 2, y, {align: 'right'}); y += 3;
+  }
+  
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.text(`TOTAL: ${currency}${currentBillForModal.total.toFixed(2)}`, width - 2, y, {align: 'right'}); y += 5;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.text(`Payment: ${currentBillForModal.paymentMode}`, 2, y); y += 3;
+  
+  if(currentBillForModal.notes) {
+    const noteLines = doc.splitTextToSize(`Note: ${currentBillForModal.notes}`, width - 4);
+    noteLines.forEach(line => {
+      doc.text(line, 2, y);
+      y += 3;
+    });
+  }
+  
+  doc.line(2, y, width - 2, y);
+  y += 4;
+  doc.text(currentBillForModal.footerText || 'Thank You! Visit Again', centerX, y, {align: 'center'});
+  y += 3;
+  if(currentBillForModal.footerText2) {
+    const footerLines = doc.splitTextToSize(currentBillForModal.footerText2, width - 4);
+    footerLines.forEach(line => {
+      doc.text(line, centerX, y, {align: 'center'});
+      y += 3;
+    });
+  }
+  
+  doc.save(`${currentBillForModal.billNo}.pdf`);
+  showToast('PDF downloaded successfully');
+}
+
+function shareBill() {
+  if(!currentBillForModal) return;
+  
+  const currency = settings.currency;
+  let text = `*${currentBillForModal.shopName || settings.shopName}*\n`;
+  if(currentBillForModal.headerText) text += `${currentBillForModal.headerText}\n`;
+  if(currentBillForModal.headerText2) text += `${currentBillForModal.headerText2}\n`;
+  text += `Mob: ${currentBillForModal.shopMobile || settings.shopMobile}\n`;
+  if(currentBillForModal.gstNo) text += `GST: ${currentBillForModal.gstNo}\n`;
+  text += `*${currentBillForModal.invoiceTitle || (currentBillForModal.isGST ? 'INVOICE' : 'BILL')}*\n`;
+  text += `━━━━━━━━━━━━━━━━━━\n`;
+  text += `Bill: ${currentBillForModal.billNo}\n`;
+  if(currentBillForModal.orderNo) text += `Order: ${currentBillForModal.orderNo}\n`;
+  if(settings.showDate !== false) text += `Date: ${new Date(currentBillForModal.date).toLocaleString()}\n`;
+  if(settings.showCustomerName !== false && currentBillForModal.customerName && currentBillForModal.customerName !== 'Walk-in Customer') {
+    text += `Customer: ${currentBillForModal.customerName}\n`;
+  }
+  if(settings.showCustomerMobile && currentBillForModal.customerMobile) {
+    text += `Mobile: ${currentBillForModal.customerMobile}\n`;
+  }
+  if(settings.showCustomerAddress && currentBillForModal.customerAddress) {
+    text += `Address: ${currentBillForModal.customerAddress}\n`;
+  }
+  text += `━━━━━━━━━━━━━━━━━━\n`;
+  
+  currentBillForModal.items.forEach(i => {
+    text += `${i.name}\n${i.qty} x ${i.rate} = ${currency}${i.total.toFixed(2)}\n`;
+  });
+  
+  text += `━━━━━━━━━━━━━━━━━━\n`;
+  text += `Subtotal: ${currency}${currentBillForModal.subtotal.toFixed(2)}\n`;
+  
+  if(currentBillForModal.discount > 0) {
+    text += `Discount: -${currency}${currentBillForModal.discount.toFixed(2)}\n`;
+  }
+  if(currentBillForModal.isGST && currentBillForModal.gstAmount > 0) {
+    text += `GST ${currentBillForModal.gstRate}%: ${currency}${currentBillForModal.gstAmount.toFixed(2)}\n`;
+  }
+  
+  text += `*TOTAL: ${currency}${currentBillForModal.total.toFixed(2)}*\n`;
+  text += `Payment: ${currentBillForModal.paymentMode}\n`;
+  
+  if(currentBillForModal.notes) {
+    text += `Note: ${currentBillForModal.notes}\n`;
+  }
+  
+  text += `━━━━━━━━━━━━━━━━━━\n`;
+  text += `${currentBillForModal.footerText || 'Thank You! Visit Again'}`;
+  if(currentBillForModal.footerText2) text += `\n${currentBillForModal.footerText2}`;
+    
+  const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+  window.open(whatsappUrl, '_blank');
+}
+
+// Daily Total
+function updateDailyTotal() {
+  const today = new Date().toDateString();
+  const todayBills = savedBills.filter(b => new Date(b.date).toDateString() === today);
+  const total = todayBills.reduce((sum, b) => sum + b.total, 0);
+  document.getElementById('dailyTotal').textContent = `${settings.currency}${total.toFixed(2)}`;
+  document.getElementById('todayBillsCount').textContent = `${todayBills.length} Bill${todayBills.length !== 1 ? 's' : ''}`;
+}
+
+// Export All Bills
+function exportAllBills() {
+  if(savedBills.length === 0) {
+    showToast('No bills to export', 'error');
+    return;
+  }
+  
+  const data = {
+    shopName: settings.shopName,
+    exportDate: new Date().toISOString(),
+    totalBills: savedBills.length,
+    totalAmount: savedBills.reduce((sum, b) => sum + b.total, 0),
+    bills: savedBills
+  };
+  
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `bills_export_${Date.now()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('Bills exported successfully');
+}
+
+// Backup & Restore
+function backupData() {
+  const data = {
+    settings: settings,
+    items: itemsMaster,
+    bills: savedBills,
+    backupDate: new Date().toISOString(),
+    version: '2.0.0'
+  };
+  
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `anmol_childrenwear_backup_${Date.now()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('Backup created successfully');
+}
+
+function restoreData(event) {
+  const file = event.target.files[0];
+  if(!file) return;
+  
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const data = JSON.parse(e.target.result);
+      
+      if(!confirm('This will replace all current data. Continue?')) return;
+      
+      if(data.settings) {
+        settings = {...defaultSettings, ...data.settings};
+        localStorage.setItem('kidsWearSettings', JSON.stringify(settings));
+      }
+      if(data.items) {
+        itemsMaster = data.items;
+        localStorage.setItem('kidsWearItems', JSON.stringify(itemsMaster));
+      }
+      if(data.bills) {
+        savedBills = data.bills;
+        localStorage.setItem('kidsWearBills', JSON.stringify(savedBills));
+      }
+      
+      applySettings();
+      loadSettingsToForm();
+      updateItemsList();
+      updateItemsDropdown();
+      updateSavedBillsList();
+      updateDailyTotal();
+      updateCustomerFieldsVisibility();
+      showToast('Data restored successfully');
+      setTimeout(() => location.reload(), 1000);
+    } catch(error) {
+      showToast('Invalid backup file', 'error');
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+function clearAllData() {
+  if(!confirm('This will delete ALL data including bills, items, and settings. This cannot be undone!')) return;
+  if(!confirm('Are you absolutely sure? All data will be lost!')) return;
+  
+  localStorage.clear();
+  showToast('All data cleared');
+  setTimeout(() => location.reload(), 1000);
+}
+
+// Button press animation
+document.addEventListener('click', (e) => {
+  if(e.target.closest('button') && settings.enableAnimation) {
+    e.target.closest('button').classList.add('btn-active');
+    setTimeout(() => e.target.closest('button').classList.remove('btn-active'), 100);
+  }
+});
+
+// Update QR code when amount changes in fixed mode
+document.addEventListener('DOMContentLoaded', () => {
+  setInterval(() => {
+    if(settings.upiId && settings.fixedBillAmount && currentBill.total > 0) {
+      const upiSection = document.getElementById('upiQrSection');
+      if(upiSection && upiSection.offsetParent !== null) {
+        generateUPIQR();
+      }
+    }
+  }, 1000);
+});
+</script>
+<script>(function(){document.addEventListener("click",function(e){var a=e.target.closest("[data-product-id]");if(!a)return;e.preventDefault();var pid=a.getAttribute("data-product-id");if(pid)parent.postMessage({type:"ecto-artifact-link-click",productId:pid},"*")})})();</script>
+
+
+
+<script>
+// --- Anmol Childrenwear - Consolidated v5.4 ---
+let editingBillIdx = -1;
+
+function editSavedBill(){
+  try{
+    if(!window.currentBillForModal){ showToast('No bill selected','error'); return; }
+    const idx = savedBills.findIndex(b=>b.billNo===window.currentBillForModal.billNo);
+    if(idx>=0){
+      const bill = JSON.parse(JSON.stringify(savedBills[idx]));
+      currentBill = {
+        items: bill.items || [],
+        customerName: bill.customerName || '',
+        customerMobile: bill.customerMobile || '',
+        customerAddress: bill.customerAddress || '',
+        paymentMode: bill.paymentMode || settings.defaultPayment,
+        total: bill.total || 0,
+        subtotal: bill.subtotal || 0,
+        discount: bill.discount || 0,
+        discountPercent: bill.discountPercent || 0,
+        gstAmount: bill.gstAmount || 0,
+        notes: bill.notes || ''
+      };
+      editingBillIdx = idx;
+      editingItemIdx = -1;
+      const setVal = (id,v)=>{ const el=document.getElementById(id); if(el) el.value=v||''; };
+      setVal('customerName', currentBill.customerName);
+      setVal('customerMobile', currentBill.customerMobile);
+      setVal('customerAddress', currentBill.customerAddress);
+      setVal('discountPercent', currentBill.discountPercent);
+      setVal('discountAmount', currentBill.discount);
+      setVal('billNotes', currentBill.notes);
+      if(typeof setPaymentMode==='function') setPaymentMode(currentBill.paymentMode);
+      closeBillModal();
+      showView('quickbill');
+      updateBillDisplay();
+      showToast('Bill edit mode - Save to update');
+    } else { showToast('Bill not found','error'); }
+  }catch(e){ showToast('Edit error: '+e.message,'error'); }
+}
+
+function openShareOptions(){ 
+  const el=document.getElementById('shareModal'); 
+  if(el){el.classList.remove('hidden');el.classList.add('flex');} 
+  else showToast('Share modal missing','error');
+}
+function closeShareModal(){ const el=document.getElementById('shareModal'); if(el){el.classList.add('hidden');el.classList.remove('flex');}}
+
+async function shareAsImage(){
+  closeShareModal();
+  const el = document.getElementById('billCaptureArea');
+  if(!el){ showToast('Bill not found', 'error'); return; }
+  try{
+    showToast('Generating image...', 'info');
+    const canvas = await html2canvas(el, {scale:2, backgroundColor:'#fff', useCORS:true, allowTaint:true});
+    canvas.toBlob(async (blob)=>{
+      try{
+        const file = new File([blob], (window.currentBillForModal?.billNo || 'bill')+'.png', {type:'image/png'});
+        if(navigator.share && navigator.canShare && navigator.canShare({files:[file]})){
+          await navigator.share({files:[file], title:'Invoice'});
+          showToast('Shared successfully'); return;
+        }
+      }catch(e){}
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href=url; a.download=(window.currentBillForModal?.billNo || 'bill')+'.png'; a.click();
+      URL.revokeObjectURL(url);
+      showToast('Image downloaded');
+    }, 'image/png');
+  }catch(e){ showToast('Image share fail: '+e.message, 'error'); }
+}
+
+async function downloadPDF() {
+  if(!window.currentBillForModal) { showToast('No bill selected', 'error'); return; }
+  const el = document.getElementById('billCaptureArea');
+  if(!el){ showToast('Bill not found', 'error'); return; }
+  try{
+    showToast('Generating PDF...', 'info');
+    await new Promise(r=>setTimeout(r, 200));
+    const canvas = await html2canvas(el, {scale:2, backgroundColor:'#fff', useCORS:true, allowTaint:true});
+    const imgData = canvas.toDataURL('image/png');
+    const pdfWidth = 80;
+    const pdfHeight = canvas.height * pdfWidth / canvas.width;
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({orientation: 'portrait', unit: 'mm', format: [pdfWidth, pdfHeight + 5]});
+    doc.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+    doc.save((window.currentBillForModal.billNo || 'bill') + '.pdf');
+    showToast('PDF downloaded successfully');
+  }catch(e){ showToast('PDF error: '+e.message, 'error'); }
+}
+async function shareAsPDF(){ closeShareModal(); await downloadPDF(); }
+
+function printBillThermal(){
+  try{
+    if(!window.currentBillForModal){ showToast('No bill', 'error'); return; }
+    if(typeof bluetoothCharacteristic !== 'undefined' && bluetoothCharacteristic && typeof printBill === 'function') {
+      printBill(window.currentBillForModal);
+      showToast('Sending to thermal printer...'); return;
+    }
+    const billHtml = document.getElementById('billPreviewContent').innerHTML;
+    const w = window.open('', '_blank');
+    w.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Print Bill</title><style>@page { size: 80mm auto; margin: 2mm; } body { font-family: system-ui, sans-serif; font-size: 12px; color:#000; margin:0; } * { -webkit-print-color-adjust: exact; }</style></head><body>' + billHtml + '<scr' + 'ipt>window.onload = function(){ setTimeout(function(){ window.print(); window.close(); }, 300); }<\/scr' + 'ipt></body></html>');
+    w.document.close();
+    showToast('Print dialog opened');
+  }catch(e){ showToast('Print error: '+e.message, 'error'); }
+}
+
+// Save Bill with edit + logo/upi
+const _origSaveBill = window.saveBill;
+window.saveBill = function() {
+  if(currentBill.items.length === 0) { showToast('Add items to bill first', 'error'); return null; }
+  const getVal = (id)=>{ const el=document.getElementById(id); return el ? el.value.trim() : ''; };
+  currentBill.customerName = getVal('customerName') || 'Walk-in Customer';
+  currentBill.customerMobile = getVal('customerMobile');
+  currentBill.customerAddress = getVal('customerAddress');
+  currentBill.notes = getVal('billNotes');
+  const now = new Date();
+  const isEdit = editingBillIdx >= 0;
+  const existingBillNo = isEdit ? savedBills[editingBillIdx].billNo : `${settings.invoicePrefix}${Date.now()}`;
+  const bill = {
+    ...JSON.parse(JSON.stringify(currentBill)),
+    billNo: existingBillNo,
+    date: now.toISOString(),
+    dateString: now.toLocaleDateString(),
+    timeString: now.toLocaleTimeString(),
+    timestamp: Date.now(),
+    shopName: settings.shopName,
+    shopAddress: settings.shopAddress,
+    shopMobile: settings.shopMobile,
+    invoiceTitle: settings.invoiceTitle,
+    gstNo: settings.gstNo,
+    footerText: settings.footerText,
+    footerText2: settings.footerText2,
+    isGST: settings.enableGST,
+    gstRate: settings.gstRate,
+    printerSize: settings.printerSize,
+    orderNo: settings.orderNo,
+    businessLogo: settings.businessLogo,
+    footerImage: settings.footerImage,
+    headerText: settings.headerText,
+    headerText2: settings.headerText2,
+    upiId: settings.upiId,
+    printFormat: settings.printFormat,
+    autoCut: settings.autoCut
+  };
+  if(isEdit) { savedBills[editingBillIdx] = bill; showToast('Bill updated successfully'); editingBillIdx = -1; }
+  else { savedBills.unshift(bill); showToast('Bill saved successfully'); }
+  if(settings.autoSave) { localStorage.setItem('kidsWearBills', JSON.stringify(savedBills)); }
+  updateDailyTotal(); updateSavedBillsList();
+  return bill;
+};
+
+// View Bill with centered QR
+const _origViewBill = window.viewBill;
+window.viewBill = function(idx){
+  const bill = savedBills[idx];
+  window.currentBillForModal = bill;
+  const result = _origViewBill(idx);
+  setTimeout(()=>{
+    const holder = document.getElementById('billQrHolder');
+    if(holder && bill){
+      const upiId = (bill.upiId || settings.upiId || '').trim();
+      if(upiId){
+        holder.innerHTML = '';
+        holder.style.display = 'flex';
+        holder.style.justifyContent = 'center';
+        const upiString = 'upi://pay?pa=' + encodeURIComponent(upiId) + '&pn=' + encodeURIComponent(bill.shopName||settings.shopName) + '&am=' + bill.total.toFixed(2) + '&cu=INR';
+        try {
+          new QRCode(holder, {text: upiString, width: 140, height: 140, correctLevel: QRCode.CorrectLevel.M});
+          setTimeout(()=>{
+            const qrEl = holder.querySelector('canvas, img, table');
+            if(qrEl) qrEl.style.margin = '0 auto';
+          }, 30);
+        } catch(e) {
+          holder.innerHTML = '<img src="https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=' + encodeURIComponent(upiString) + '" width="140" height="140" crossorigin="anonymous" style="display:block;margin:0 auto" />';
+        }
+      }
+    }
+  }, 100);
+  return result;
+};
+
+// Settings - null-safe apply
+const _origApplySettings = window.applySettings;
+window.applySettings = function(){
+  try {
+    document.documentElement.style.setProperty('--primary', settings.themeColor || '#7c3aed');
+    document.documentElement.style.setProperty('--font-size-base', (settings.fontSize || 16) + 'px');
+    const setText = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = val; };
+    setText('shopNameDisplay', settings.shopName);
+    setText('headerTextDisplay', settings.headerText || 'BY ANISHHUSEN');
+    setText('headerText2Display', settings.headerText2 || 'Professional Billing');
+    setText('currencyLabel', settings.currency || '₹');
+    const headerLogo = document.getElementById('headerLogo');
+    if(headerLogo && settings.businessLogo) {
+      headerLogo.innerHTML = '<img src="'+settings.businessLogo+'" class="w-12 h-12 rounded-xl object-cover" />';
+    }
+    if(!settings.enableAnimation) { document.body.classList.add('no-animation'); } else { document.body.classList.remove('no-animation'); }
+    const gstSection = document.getElementById('gstSection');
+    if(gstSection) {
+      if(settings.enableGST) { gstSection.classList.remove('hidden'); setText('gstRateDisplay', settings.gstRate); }
+      else { gstSection.classList.add('hidden'); }
+    }
+  } catch(e) { console.warn('applySettings:', e); }
+};
+
+// Settings - hardened save
+const _origSaveSettings = window.saveSettings;
+window.saveSettings = function(){
+  try {
+    return _origSaveSettings.apply(this, arguments);
+  } catch(e) {
+    console.error('saveSettings error', e);
+    const getVal = (id, def='') => { const el=document.getElementById(id); return el ? el.value : def; };
+    const getChk = (id) => { const el=document.getElementById(id); return el ? el.checked : false; };
+    try {
+      settings.shopName = getVal('set-shopName', settings.shopName);
+      settings.shopAddress = getVal('set-shopAddress', settings.shopAddress);
+      settings.shopMobile = getVal('set-shopMobile', settings.shopMobile);
+      settings.headerText = getVal('set-headerText');
+      settings.headerText2 = getVal('set-headerText2');
+      settings.gstNo = getVal('set-gstNo');
+      settings.invoiceTitle = getVal('set-invoiceTitle', 'TAX INVOICE');
+      settings.invoicePrefix = getVal('set-invoicePrefix', 'BILL');
+      settings.orderNo = getVal('set-orderNo');
+      settings.footerText = getVal('set-footerText', 'Thank You! Visit Again');
+      settings.footerText2 = getVal('set-footerText2');
+      settings.upiId = getVal('set-upiId');
+      settings.fixedBillAmount = getChk('set-fixedBillAmount');
+      settings.currency = getVal('set-currency', '₹');
+      settings.enableGST = getChk('set-enableGST');
+      settings.gstRate = parseFloat(getVal('set-gstRate', '18')) || 18;
+      settings.printerSize = getVal('set-printerSize', '80mm');
+      settings.printFormat = getVal('set-printFormat', 'english');
+      settings.defaultPayment = getVal('set-defaultPayment', 'Cash');
+      settings.themeColor = getVal('set-themeColor', '#7c3aed');
+      settings.fontSize = parseInt(getVal('set-fontSize', '16')) || 16;
+      settings.enableAnimation = getChk('set-enableAnimation');
+      settings.autoSave = getChk('set-autoSave');
+      settings.soundEnabled = getChk('set-soundEnabled');
+      settings.showCustomerName = getChk('set-showCustomerName');
+      settings.showCustomerMobile = getChk('set-showCustomerMobile');
+      settings.showCustomerAddress = getChk('set-showCustomerAddress');
+      settings.showCredit = getChk('set-showCredit');
+      settings.showDate = getChk('set-showDate');
+      settings.autoCut = getChk('set-autoCut');
+      localStorage.setItem('kidsWearSettings', JSON.stringify(settings));
+      try { applySettings(); } catch(e){}
+      showToast('Settings saved successfully!');
+    } catch(e2) {
+      showToast('Settings save failed: ' + e2.message, 'error');
+    }
+  }
+};
+
+
+// --- v5.5 Add-ons: WhatsApp / CSV / Bluetooth ---
+
+// 1. WhatsApp Bill Share with text
+async function shareBillWhatsApp(){
+  if(!window.currentBillForModal){ showToast('No bill','error'); return; }
+  const b = window.currentBillForModal;
+  let text = `*${b.shopName || settings.shopName}*
+`;
+  text += `Bill No: ${b.billNo}
+`;
+  text += `Date: ${new Date(b.date).toLocaleDateString('en-GB')}
+`;
+  text += `------------------------
+`;
+  b.items.forEach((it,i)=>{ text += `${i+1}. ${it.name} x${it.qty} = ₹${it.total.toFixed(2)}
+`; });
+  text += `------------------------
+`;
+  text += `*Total: ₹${b.total.toFixed(2)}*
+`;
+  text += `Payment: ${b.paymentMode}
+`;
+  if(b.upiId || settings.upiId) text += `UPI: ${b.upiId || settings.upiId}
+`;
+  text += `
+${b.footerText || 'Thank You! Visit Again'}`;
+  const url = 'https://wa.me/?text=' + encodeURIComponent(text);
+  window.open(url, '_blank');
+  showToast('WhatsApp opened');
+}
+
+// Hook WhatsApp button if present
+document.addEventListener('click', function(e){
+  const t = e.target.closest('[onclick*="shareBillWhatsApp"]');
+  if(t) { e.preventDefault(); shareBillWhatsApp(); }
+});
+
+// 2. Items CSV Import / Export
+function importItemsFromCSV(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e){
+    try{
+      const text = e.target.result;
+      const lines = text.split(/\r?\n/).filter(l=>l.trim());
+      let added = 0;
+      lines.forEach((line,idx)=>{
+        if(idx===0 && /name/i.test(line)) return; // skip header
+        const parts = line.split(/[,;\t]/);
+        if(parts.length < 2) return;
+        const name = parts[0].trim().replace(/^"|"$/g,'');
+        const rate = parseFloat(parts[1]);
+        if(name && !isNaN(rate)){
+          const exists = itemsMaster.find(it => it.name.toLowerCase() === name.toLowerCase());
+          if(!exists){
+            itemsMaster.push({id: Date.now()+added, name, rate, stock: 999});
+            added++;
+          } else {
+            exists.rate = rate;
+          }
+        }
+      });
+      localStorage.setItem('kidsWearItems', JSON.stringify(itemsMaster));
+      if(typeof updateItemsList === 'function') updateItemsList();
+      if(typeof updateItemsDatalist === 'function') updateItemsDatalist();
+      showToast(added + ' items imported');
+    }catch(err){ showToast('CSV error: '+err.message,'error'); }
+    event.target.value = '';
+  };
+  reader.readAsText(file);
+}
+function exportItemsCSV(){
+  if(!window.itemsMaster || itemsMaster.length===0){ showToast('No items','error'); return; }
+  let csv = 'Name,Rate\n';
+  itemsMaster.forEach(it => { csv += `"${it.name.replace(/"/g,'""')}",${it.rate}\n`; });
+  const blob = new Blob([csv], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download='anmol_items.csv'; a.click();
+  URL.revokeObjectURL(url);
+  showToast('Items exported');
+}
+
+// 3. Bluetooth Thermal Printer (ESC/POS)
+let btDevice = null, btCharacteristic = null;
+async function connectBluetoothPrinter(){
+  try{
+    if(!navigator.bluetooth){ showToast('Bluetooth not supported in this browser','error'); return; }
+    showToast('Select your printer...','info');
+    btDevice = await navigator.bluetooth.requestDevice({
+      filters: [{services: ['000018f0-0000-1000-8000-00805f9b34fb']}, {namePrefix: 'M'}, {namePrefix: 'POS'}, {namePrefix: 'Blue'}],
+      optionalServices: ['generic_access', '49535343-fe7d-4ae5-8fa9-9fafd205e455', 'e7810a71-73ae-499d-8c15-faa9aef0c3f2', '000018f0-0000-1000-8000-00805f9b34fb']
+    }).catch(()=> navigator.bluetooth.requestDevice({acceptAllDevices:true, optionalServices: ['generic_access','49535343-fe7d-4ae5-8fa9-9fafd205e455']}));
+    const server = await btDevice.gatt.connect();
+    const services = await server.getPrimaryServices();
+    for(const svc of services){
+      const chars = await svc.getCharacteristics();
+      for(const ch of chars){
+        if(ch.properties.write || ch.properties.writeWithoutResponse){
+          btCharacteristic = ch;
+          break;
+        }
+      }
+      if(btCharacteristic) break;
+    }
+    if(btCharacteristic){
+      document.getElementById('btStatus') && (document.getElementById('btStatus').textContent = 'Connected ✓');
+      showToast('Printer connected');
+      window.bluetoothCharacteristic = btCharacteristic; // for existing printBill()
+    } else {
+      showToast('No writable characteristic found','error');
+    }
+  }catch(e){
+    showToast('BT error: ' + e.message,'error');
+  }
+}
+
+// ESC/POS print helper - used by existing printBill()
+window.printBill = async function(bill){
+  let ch = window.btCharacteristic || window.bluetoothCharacteristic;
+  let dev = window.btDevice || window.bluetoothPrinter;
+  try{
+    if(dev && dev.gatt && !dev.gatt.connected){
+      showToast('Reconnecting printer...','info');
+      await dev.gatt.connect();
+      await new Promise(r=>setTimeout(r,300));
+    }
+    ch = window.btCharacteristic || window.bluetoothCharacteristic;
+  }catch(e){}
+  if(!ch){ showToast('Printer not connected – Connect button dubara dabao','error'); return; }
+  try{
+    const enc = new TextEncoder();
+    const cmds = [];
+    const push = (s)=> cmds.push(...enc.encode(s));
+    push('\x1b\x40'); // init
+    push('\x1b\x61\x01'); // center
+    push((bill.shopName||'ANMOL')+'\n');
+    push((bill.shopAddress||'')+'\n');
+    push('-------------------------------\n');
+    push('\x1b\x61\x00'); // left
+    push(`Bill: ${bill.billNo}\n`);
+    push(`Date: ${new Date(bill.date).toLocaleString('en-GB')}\n`);
+    push('-------------------------------\n');
+    bill.items.forEach(it=>{
+      const line = `${it.name.substring(0,16).padEnd(16)} ${String(it.qty).padStart(2)} x${it.rate.toFixed(0).padStart(4)} ${it.total.toFixed(2).padStart(7)}\n`;
+      push(line);
+    });
+    push('-------------------------------\n');
+    push('\x1b\x45\x01'); // bold on
+    push(`TOTAL: ₹ ${bill.total.toFixed(2)}\n`);
+    push('\x1b\x45\x00');
+    push('\nThank You! Visit Again\n\n\n');
+    push('\x1d\x56\x00'); // cut
+    const data = new Uint8Array(cmds);
+    // chunked write
+    const chunkSize = 180;
+    for(let i=0;i<data.length;i+=chunkSize){
+      await btCharacteristic.writeValueWithResponse ? await btCharacteristic.writeValueWithResponse(data.slice(i,i+chunkSize)) : await btCharacteristic.writeValue(data.slice(i,i+chunkSize));
+      await new Promise(r=>setTimeout(r,40));
+    }
+    showToast('Print sent');
+  }catch(e){ showToast('Print failed: '+e.message,'error'); }
+};
+
+// Auto-attach WhatsApp share to existing Share modal
+setTimeout(()=>{
+  const shareModal = document.getElementById('shareModal');
+  if(shareModal && !shareModal.querySelector('[data-wa]')){
+    const firstBtn = shareModal.querySelector('button');
+    if(firstBtn && firstBtn.parentNode){
+      const waBtn = document.createElement('button');
+      waBtn.className = 'w-full bg-green-500 hover:bg-green-600 text-white py-3 rounded-xl font-bold';
+      waBtn.setAttribute('data-wa','1');
+      waBtn.innerHTML = '<i class="fa-brands fa-whatsapp mr-2"></i>Share on WhatsApp';
+      waBtn.onclick = ()=>{ closeShareModal(); shareBillWhatsApp(); };
+      firstBtn.parentNode.insertBefore(waBtn, firstBtn);
+    }
+  }
+}, 800);
+
+console.log('Anmol Bill v5.5 - WhatsApp / CSV / Bluetooth loaded'); //
+
+</script>
+
+<script>
+// Quick Bill - Enter key to add item
+(function(){
+  function setupEnter(){
+    const nameEl = document.getElementById('itemName');
+    const qtyEl = document.getElementById('itemQty');
+    const rateEl = document.getElementById('itemRate');
+    if(!nameEl || !qtyEl || !rateEl) return;
+    const addItem = ()=>{ if(typeof addOrUpdateBillItem === 'function') addOrUpdateBillItem(); setTimeout(()=>{ nameEl.focus(); }, 50); };
+    nameEl.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); qtyEl.focus(); qtyEl.select(); }});
+    qtyEl.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); rateEl.focus(); rateEl.select(); }});
+    rateEl.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); addItem(); }});
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', setupEnter);
+  else setupEnter();
+})();
+</script>
+
+<!-- Firebase Cloud Sync v5.6 -->
+<script type="module">
+import { initializeApp } from 'firebase/app';
+import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut as fbSignOut } from 'firebase/auth';
+import { getFirestore, collection, doc, setDoc, addDoc, onSnapshot, query, orderBy, serverTimestamp, enableIndexedDbPersistence } from 'firebase/firestore';
+
+// --- 1. PASTE YOUR FIREBASE CONFIG HERE ---
+const firebaseConfig = {
+  apiKey: "AIzaSyDLronC3Re5yJ4CnVAkSP979mDg8OSbvOk",
+  authDomain: "anmol-childrenwears.firebaseapp.com",
+  projectId: "anmol-childrenwears",
+  storageBucket: "anmol-childrenwears.firebasestorage.app",
+  messagingSenderId: "23057703612",
+  appId: "1:23057703612:web:0c01284b1b6e461cb526b9"
+};
+// Get this from Firebase Console → Project Settings → Web app → Config
+// -----------------------------------------
+
+let app, auth, db;
+let cloudEnabled = false;
+try {
+  if(firebaseConfig.apiKey && firebaseConfig.apiKey !== "YOUR_API_KEY"){
+    app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    db = getFirestore(app);
+    enableIndexedDbPersistence(db).catch(()=>{});
+    cloudEnabled = true;
+  }
+} catch(e){ console.warn('Firebase init failed', e); }
+
+const statusEl = document.getElementById('cloudStatus');
+const emailEl = document.getElementById('cloudEmail');
+const loginBtn = document.getElementById('cloudLoginBtn');
+const logoutBtn = document.getElementById('cloudLogoutBtn');
+
+function setStatus(t){ if(statusEl) statusEl.textContent = t; }
+
+window.cloudSync = {
+  user: null,
+  unsubBills: null,
+  unsubItems: null,
+  async signIn(){
+    if(!cloudEnabled){ alert('Firebase config missing!\n\nFile me firebaseConfig me apni API keys paste karo.\nFirebase Console → Project Settings → Web app'); return; }
+    const provider = new GoogleAuthProvider();
+    try { await signInWithPopup(auth, provider); } catch(e){ alert('Login failed: '+e.message); }
+  },
+  async signOut(){ if(auth) await fbSignOut(auth); }
+};
+
+if(!cloudEnabled){
+  setStatus('Offline – Local only (Firebase config missing)');
+} else {
+  setStatus('Ready – Login to sync');
+  onAuthStateChanged(auth, async (user)=>{
+    if(!user){
+      window.cloudSync.user = null;
+      setStatus('Offline – Local only');
+      emailEl.textContent = '';
+      loginBtn.style.display = '';
+      logoutBtn.style.display = 'none';
+      return;
+    }
+    window.cloudSync.user = user;
+    emailEl.textContent = ' • ' + user.email;
+    loginBtn.style.display = 'none';
+    logoutBtn.style.display = '';
+    setStatus('Cloud sync ON ✓');
+    
+    const uid = user.uid;
+    const billsCol = collection(db, 'shops', uid, 'bills');
+    const itemsCol = collection(db, 'shops', uid, 'items');
+    const settingsDoc = doc(db, 'shops', uid, 'meta', 'settings');
+
+    // --- Bills live sync ---
+    if(window.cloudSync.unsubBills) window.cloudSync.unsubBills();
+    window.cloudSync.unsubBills = onSnapshot(query(billsCol, orderBy('timestamp','desc')), (snap)=>{
+      const cloudBills = [];
+      snap.forEach(d=> cloudBills.push({id:d.id, ...d.data()}));
+      if(cloudBills.length>0 || (window.savedBills && window.savedBills.length===0)){
+        window.savedBills = cloudBills;
+        localStorage.setItem('kidsWearBills', JSON.stringify(cloudBills));
+        if(typeof updateSavedBillsList === 'function') updateSavedBillsList();
+        if(typeof updateDailyTotal === 'function') updateDailyTotal();
+      }
+    });
+
+    // --- Items live sync ---
+    if(window.cloudSync.unsubItems) window.cloudSync.unsubItems();
+    window.cloudSync.unsubItems = onSnapshot(itemsCol, (snap)=>{
+      const cloudItems = [];
+      snap.forEach(d=> cloudItems.push({id:d.id, ...d.data()}));
+      if(cloudItems.length>0){
+        window.itemsMaster = cloudItems;
+        localStorage.setItem('kidsWearItems', JSON.stringify(cloudItems));
+        if(typeof updateItemsList === 'function') updateItemsList();
+        if(typeof updateItemsDatalist === 'function') updateItemsDatalist();
+      }
+    });
+
+    // --- First login migration: upload local bills/items ---
+    const localBills = JSON.parse(localStorage.getItem('kidsWearBills')||'[]');
+    if(localBills.length>0){
+      const snapCheck = await new Promise(res=>{
+        const unsub = onSnapshot(query(billsCol), s=>{ unsub(); res(s.size); }, ()=>res(0));
+        setTimeout(()=>res(0), 1500);
+      });
+      if(snapCheck===0){
+        if(confirm(localBills.length + ' local bills cloud me upload kar du?')){
+          for(const b of localBills){ try{ await setDoc(doc(billsCol, b.billNo), {...b, timestamp: b.timestamp||Date.now()}); }catch(e){} }
+          alert('Upload complete!');
+        }
+      }
+    }
+  });
+
+  // --- Hook saveBill to cloud ---
+  const _origSaveBill = window.saveBill;
+  window.saveBill = function(){
+    const bill = _origSaveBill.apply(this, arguments);
+    if(bill && window.cloudSync.user && db){
+      const uid = window.cloudSync.user.uid;
+      setDoc(doc(db, 'shops', uid, 'bills', bill.billNo), {...bill, timestamp: Date.now(), updatedAt: serverTimestamp()}).catch(()=>{});
+    }
+    return bill;
+  };
+
+  // --- Hook items save ---
+  const origAddItem = window.addMasterItem;
+  if(origAddItem){
+    window.addMasterItem = function(){
+      const r = origAddItem.apply(this, arguments);
+      setTimeout(async ()=>{
+        if(window.cloudSync.user && window.itemsMaster){
+          const uid = window.cloudSync.user.uid;
+          for(const it of window.itemsMaster){
+            try{ await setDoc(doc(db, 'shops', uid, 'items', String(it.id||it.name)), it, {merge:true}); }catch(e){}
+          }
+        }
+      }, 200);
+      return r;
+    };
+  }
+
+  // --- Hook settings save ---
+  const origSaveSettings = window.saveSettings;
+  if(origSaveSettings){
+    window.saveSettings = function(){
+      const r = origSaveSettings.apply(this, arguments);
+      if(window.cloudSync.user && window.settings){
+        const uid = window.cloudSync.user.uid;
+        setDoc(doc(db, 'shops', uid, 'meta', 'settings'), {...window.settings, updatedAt: serverTimestamp()}, {merge:true}).catch(()=>{});
+      }
+      return r;
+    };
+  }
+}
+console.log('Anmol Bill v5.6 Firebase Cloud loaded');
+</script>
+
+</body>
+</html>
